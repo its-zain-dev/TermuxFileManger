@@ -30,7 +30,7 @@ import java.util.Map;
 
 /** Command center for Termux: commands, packages, libraries and runtime diagnostics. */
 public class ToolsActivity extends Activity {
-    private int BG, PANEL, PANEL_2, TEXT, MUTED, ACCENT;
+    private int BG, PANEL, PANEL_2, TEXT, MUTED, ACCENT, DIVIDER;
     private String lastThemeName="midnight";
     private EditText commandInput;
     private EditText workdirInput;
@@ -42,7 +42,7 @@ public class ToolsActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        UiTheme palette=UiTheme.get(this); BG=palette.bg; PANEL=palette.panel; PANEL_2=palette.panel2; TEXT=palette.text; MUTED=palette.muted; ACCENT=palette.accent; lastThemeName=UiTheme.getName(this);
+        UiTheme palette=UiTheme.get(this); BG=palette.bg; PANEL=palette.panel; PANEL_2=palette.panel2; TEXT=palette.text; MUTED=palette.muted; ACCENT=palette.accent; DIVIDER=Color.rgb(42,53,77); lastThemeName=UiTheme.getName(this);
         getWindow().setStatusBarColor(BG);
         getWindow().setNavigationBarColor(BG);
         UiTheme.applyWindow(this);

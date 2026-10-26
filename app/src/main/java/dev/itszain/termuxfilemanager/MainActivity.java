@@ -46,7 +46,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class MainActivity extends Activity {
-    private int BG, PANEL, PANEL_2, TEXT, MUTED, ACCENT, DANGER;
+    private int BG, PANEL, PANEL_2, TEXT, MUTED, ACCENT, DANGER, DIVIDER;
     private String lastThemeName = "midnight";
     private static final String TERMUX_HOME = "/data/data/com.termux/files/home";
     private static final String TERMUX_PREFIX = "/data/data/com.termux/files/usr";
@@ -355,7 +355,7 @@ except Exception as e:
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        UiTheme palette = UiTheme.get(this); BG=palette.bg; PANEL=palette.panel; PANEL_2=palette.panel2; TEXT=palette.text; MUTED=palette.muted; ACCENT=palette.accent; DANGER=palette.danger; lastThemeName=UiTheme.getName(this);
+        UiTheme palette = UiTheme.get(this); BG=palette.bg; PANEL=palette.panel; PANEL_2=palette.panel2; TEXT=palette.text; MUTED=palette.muted; ACCENT=palette.accent; DANGER=palette.danger; DIVIDER=Color.rgb(42, 53, 77); lastThemeName=UiTheme.getName(this);
         getWindow().setStatusBarColor(BG);
         getWindow().setNavigationBarColor(BG);
         UiTheme.applyWindow(this);
@@ -1097,6 +1097,71 @@ except Exception as e:
             startService(intent);
         } catch (Exception e) {
             showBridgeError("تعذر تشغيل الأمر: " + e.getMessage());
+        }
+    }
+
+    // Small programmatic UI helpers shared by the redesigned file-manager screen.
+    private int dp(float value) {
+        return (int) (value * getResources().getDisplayMetrics().density + 0.5f);
+    }
+
+    private GradientDrawable round(int color, int radiusDp, int strokeColor) {
+        GradientDrawable drawable = new GradientDrawable();
+        drawable.setColor(color);
+        drawable.setCornerRadius(dp(radiusDp));
+        if (strokeColor != Color.TRANSPARENT) drawable.setStroke(dp(1), strokeColor);
+        return drawable;
+    }
+
+    private Button button(String label, int background, int color) {
+        Button view = new Button(this);
+        view.setText(label);
+        view.setTextColor(color);
+        view.setTextSize(13);
+        view.setAllCaps(false);
+        view.setMinHeight(0);
+        view.setMinimumHeight(0);
+        view.setPadding(dp(9), dp(5), dp(9), dp(5));
+        view.setBackground(round(background, 11, Color.TRANSPARENT));
+        return view;
+    }
+
+    private TextView text(String value, int size, int color, boolean bold) {
+        TextView view = new TextView(this);
+        view.setText(value);
+        view.setTextSize(size);
+        view.setTextColor(color);
+        if (bold) view.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        view.setGravity(Gravity.CENTER_VERTICAL);
+        return view;
+    }
+
+    private Button buttonSmall(String label, Runnable action) {
+        Button view = button(label, PANEL, TEXT);
+        view.setTextSize(11);
+        view.setOnClickListener(v -> {
+            if (action != null) action.run();
+        });
+        return view;
+    }
+
+    private LinearLayout.LayoutParams weightLp() {
+        return new LinearLayout.LayoutParams(0, dp(38), 1f);
+    }
+
+    private void setStatus(String message, int color) {
+        if (statusLabel != null) {
+            statusLabel.setText(message == null ? "" : message);
+            statusLabel.setTextColor(color);
+        }
+    }
+
+    private boolean isTermuxInstalled() {
+        try {
+            getPackageManager().getPackageInfo("com.termux", 0);
+            return true;
+        } catch (Exception ignored) {
+            return false;
         }
     }
 

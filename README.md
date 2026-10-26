@@ -1,44 +1,48 @@
 # Termux File Manager (TFM)
 
-Android file-manager UI for browsing and managing files available to the Termux app. The project is written in Java with a native Android interface; it does not display a terminal as its main UI.
+A native Java Android companion for Termux. It combines file management with a command/tool center, and can send selected text from other Android apps to a Termux Bash session.
 
-## Features in this first build
+## What's included in v0.2.0
 
-- Browse Termux `$HOME`, `$PREFIX`, `/`, and shared storage paths.
-- Show hidden dotfiles by default, including `.bashrc` and `.termux`.
-- Search filenames recursively from the current directory.
-- Create files/folders; view and edit small text files; copy, move, rename, and delete files/folders.
-- Inspect basic metadata and change read/write/execute permissions.
-- Run a selected file in a Termux terminal session.
-- Use Termux's `RUN_COMMAND` interface rather than asking for root access or opening a terminal as the primary screen.
+### File workspace
+- Browse Termux home, prefix, root-visible paths, and shared-storage paths that Termux can access.
+- Show hidden dotfiles; search recursively; page large folder listings.
+- Create, view, edit, copy, move, rename, delete, inspect, and change file permissions.
+- Edit UTF-8 text files up to 256 KiB in the built-in editor; use `nano` or `vi` in Termux for larger files.
+- Open scripts with suggested runners for Bash, Python, JavaScript/Node, TypeScript/tsx, Ruby, PHP, Perl, Lua, R, Go, Swift, Haskell, Elixir, Erlang, Nim, Zig, Dart, C, C++, Rust, Java, Kotlin, and several other common extensions.
+- Use a custom runner command for any other language/tool installed in Termux.
+- Short, lightweight fade/slide transitions when navigating folders and search results.
 
-## Important limits
+### Tools center
+- Run arbitrary one-line or multi-line Shell commands in a real Termux terminal session.
+- Set the working directory for a command.
+- Search/install/update Termux packages with `pkg`.
+- Install/manage libraries or tools through helpers for Python `pip`, Node.js `npm`, Rust `cargo`, Ruby `gem`, and Go `go install`.
+- Inspect installed runtimes/compilers and system/storage information.
+- Create/extract common `.tar.gz`, `.tar`, and `.zip` archives.
 
-- This is a source-project preview. It has not been compiled into an APK in this environment because Android SDK/Gradle downloads are unavailable here. The included GitHub Actions workflow builds a debug APK after the project is pushed to a GitHub repository; it uploads `app-debug.apk` as an Actions artifact.
-- Termux must be installed and recent enough to support `RUN_COMMAND` result callbacks (Termux 0.109 or newer recommended). Python is required inside Termux (`pkg install python`).
-- Android sandbox rules still apply. The app sees files the Termux app UID can access; it does not gain root or permission to read other apps' private directories.
-- The built-in text editor is intentionally capped at 32 KB when reading a file, to keep command-result callbacks within Android's transaction limits. Larger and binary files can still be copied, moved, renamed, chmod'ed, executed (when appropriate), or deleted.
-- Recursive search caps its displayed results at 150 per search. Folder listings load 100 entries per page.
-- Deletion is permanent. Directories are removed recursively after the confirmation dialog.
+### Run selected text in Termux
+When text is selected in a compatible Android app, open the text-selection actions menu (sometimes under **More/⋮**) and choose **RUN CODE ON TERMUX**. Review the selected text in the confirmation screen, then choose **تنفيذ الآن** to open a Termux session and run it with Bash. This is an Android text-selection action, not a button injected into the Gboard keyboard row; Android does not allow an ordinary app to add arbitrary actions to another keyboard's UI.
 
-## One-time setup on the device
+## Requirements
+- Android 6.0+ (API 23+).
+- Termux installed and supporting the `com.termux.RUN_COMMAND` interface (Termux 0.109+ recommended).
+- Termux's `allow-external-apps=true` setting and the Android `Run commands in Termux environment` permission enabled for this app.
+- Languages and package tools must be installed inside Termux before their runners can use them. The app does not bundle every language runtime and cannot install tools without the user's consent.
 
-1. Install Termux (use the same trusted distribution source used for Termux add-ons).
-2. Open Termux File Manager and tap **الربط** (Link), then **نسخ أمر الإعداد** (Copy setup command). The app copies the setup command and opens Termux.
-3. Paste and run the command in Termux. It sets `allow-external-apps=true` and installs Python. Fully close and restart Termux afterward.
-4. In Android Settings, open **Termux File Manager → Permissions / Additional permissions** and grant **Run commands in Termux environment** if Android shows it there.
-5. Reopen the file manager and press Refresh.
+## One-time setup
+1. Open **الربط** in the app and copy the setup command.
+2. Paste and run it inside Termux, then fully close and restart Termux.
+3. In Android Settings, grant **Run commands in Termux environment** to Termux File Manager when the permission is available.
+4. Return to the app and refresh.
 
-The setup command changes Termux's `~/.termux/termux.properties` to allow external app commands. This is an explicit security boundary in Termux. Only use this app build if you trust its source.
+## Build with GitHub Actions
+Push this directory to GitHub. The **Android APK** workflow builds a debug APK using Java 17, Gradle 8.9, and Android Gradle Plugin 8.7.3. Download `TermuxFileManager-debug-apk` from the successful run's Artifacts section.
 
-## Build an APK with GitHub Actions
-
-1. Push this project folder to a GitHub repository.
-2. In the repository, open **Actions** and run **Android APK**, or push a commit to trigger it automatically.
-3. Open the completed workflow run and download the `TermuxFileManager-debug-apk` artifact. Extract the ZIP artifact and install `app-debug.apk` on Android.
-
-The workflow uses Java 17, Gradle 8.9, and Android Gradle Plugin 8.7.3. A signing/release pipeline is not included yet; this first workflow produces a debug-signed APK.
-
-## Security note
-
-The app executes file operations with Termux's own user permissions. It does not use root or a network server. File execution is a deliberate user action and can run arbitrary code from the selected file; only run files you trust.
+## Security and limits
+- Commands run as the Termux app user. This app does not provide root access and cannot bypass Android's app sandbox.
+- Both the selected-text action and the command center display a confirmation before running user-supplied shell text. Shell commands can still delete files, change packages, or execute downloaded code; only run commands you trust.
+- The selected text is passed as a Bash command, not treated as plain text. Do not select and run untrusted snippets.
+- The built-in editor is for small/medium UTF-8 text files. Binary files and files over 256 KiB are not opened in it.
+- Recursive search displays at most 150 results at a time. Directory listings are paginated.
+- File deletion is permanent and recursive after confirmation.

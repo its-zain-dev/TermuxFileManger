@@ -23,6 +23,7 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
+import android.view.animation.DecelerateInterpolator;
 import android.widget.AdapterView;
 import android.widget.BaseAdapter;
 import android.widget.Button;
@@ -78,6 +79,8 @@ public class MainActivity extends Activity {
     private int nextOffset = 0;
     private boolean moreAvailable = false;
     private boolean receiverRegistered = false;
+    private int viewRequestGeneration = 0;
+    private boolean listingInProgress = false;
 
     private interface ResultCallback {
         void onResult(JSONObject response, String error);
@@ -214,11 +217,11 @@ def run():
         if not os.path.isfile(path):
             fail('هذا مو ملف عادي أو الملف غير موجود.'); return
         with open(path, 'rb') as f:
-            raw = f.read(32769)
+            raw = f.read(262145)
         if b'\\x00' in raw[:4096]:
             emit({'ok': True, 'binary': True, 'size': os.path.getsize(path), 'path': path}); return
-        if len(raw) > 32768:
-            emit({'ok': False, 'tooLarge': True, 'error': 'الملف أكبر من الحد الآمن للعرض داخل التطبيق (32 KB).'}); return
+        if len(raw) > 262144:
+            emit({'ok': False, 'tooLarge': True, 'error': 'الملف أكبر من الحد الآمن للعرض داخل التطبيق (256 KB).'}); return
         text = raw.decode('utf-8', errors='replace')
         emit({'ok': True, 'binary': False, 'text': text, 'size': os.path.getsize(path), 'path': path}); return
     if action == 'write':
@@ -226,8 +229,8 @@ def run():
         text = req.get('text', '')
         if not isinstance(text, str):
             fail('محتوى الملف غير صالح.'); return
-        if len(text.encode('utf-8')) > 140000:
-            fail('النص أكبر من الحد المسموح للتحرير بهالنسخة.'); return
+        if len(text.encode('utf-8')) > 262144:
+            fail('النص أكبر من حد المحرر (256 KB).'); return
         target = os.path.realpath(path) if os.path.islink(path) else path
         if not os.path.isfile(target):
             fail('الملف غير موجود.'); return
@@ -409,9 +412,17 @@ except Exception as e:
         top.setOrientation(LinearLayout.HORIZONTAL);
         TextView title = text("TFM  |  مدير ملفات Termux", 19, TEXT, true);
         top.addView(title, new LinearLayout.LayoutParams(0, dp(48), 1));
+        Button toolsHub = button("الأدوات", PANEL_2, ACCENT);
+        toolsHub.setOnClickListener(v -> {
+            startActivity(new Intent(this, ToolsActivity.class));
+            overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out);
+        });
+        top.addView(toolsHub, new LinearLayout.LayoutParams(dp(70), dp(40)));
         Button help = button("الربط", PANEL_2, ACCENT);
         help.setOnClickListener(v -> showHelpDialog(false));
-        top.addView(help, new LinearLayout.LayoutParams(dp(72), dp(40)));
+        LinearLayout.LayoutParams helpLp = new LinearLayout.LayoutParams(dp(62), dp(40));
+        helpLp.leftMargin = dp(5);
+        top.addView(help, helpLp);
         root.addView(top);
 
         connectionLabel = text("غير متصل بـ Termux", 12, MUTED, false);
@@ -494,6 +505,7 @@ except Exception as e:
         listView.setCacheColorHint(Color.TRANSPARENT);
         listView.setBackgroundColor(BG);
         listView.setSelector(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
+        listView.setItemViewCacheSize(8);
         adapter = new FileAdapter();
         listView.setAdapter(adapter);
         listView.setOnItemClickListener((parent, view, position, id) -> onFileClicked(files.get(position)));
@@ -602,8 +614,12 @@ except Exception as e:
 
     private void loadDirectory(String path, boolean append) {
         if (!ensureReady()) return;
+        if (append && listingInProgress) return;
+        final int requestGeneration = ++viewRequestGeneration;
+        listingInProgress = true;
         searchMode = false;
         if (!append) {
+            animateListOut();
             currentPath = path;
             nextOffset = 0;
             moreAvailable = false;
@@ -620,10 +636,13 @@ except Exception as e:
             payload.put("limit", 100);
         } catch (JSONException ignored) { }
         runBridge("list", payload, (response, error) -> {
+            if (requestGeneration != viewRequestGeneration) return;
+            listingInProgress = false;
             if (error != null) {
                 connected = false;
                 updatePathView();
                 setStatus("فشل الاتصال", DANGER);
+                animateListIn();
                 showBridgeError(error);
                 return;
             }
@@ -641,6 +660,7 @@ except Exception as e:
             moreAvailable = response.optBoolean("more", false);
             moreButton.setVisibility(moreAvailable ? View.VISIBLE : View.GONE);
             adapter.notifyDataSetChanged();
+            animateListIn();
             updatePathView();
             int total = response.optInt("total", files.size());
             String note = response.optInt("metadataErrors", 0) > 0 ? " • بعض العناصر صلاحيتها محدودة" : "";
@@ -655,9 +675,12 @@ except Exception as e:
 
     private void searchFiles(String query) {
         if (!ensureReady()) return;
+        final int requestGeneration = ++viewRequestGeneration;
+        listingInProgress = true;
         String rootPath = currentPath;
         searchRoot = rootPath;
         searchMode = true;
+        animateListOut();
         files.clear();
         adapter.notifyDataSetChanged();
         moreButton.setVisibility(View.GONE);
@@ -670,6 +693,8 @@ except Exception as e:
             payload.put("limit", 150);
         } catch (JSONException ignored) { }
         runBridge("search", payload, (response, error) -> {
+            if (requestGeneration != viewRequestGeneration) return;
+            listingInProgress = false;
             if (error != null) {
                 searchMode = false;
                 showBridgeError(error);
@@ -686,6 +711,7 @@ except Exception as e:
             }
             moreAvailable = response.optBoolean("more", false);
             adapter.notifyDataSetChanged();
+            animateListIn();
             connectionLabel.setText("نتائج البحث داخل: " + rootPath);
             connectionLabel.setTextColor(ACCENT);
             setStatus("نتائج: " + files.size() + (moreAvailable ? " • أكو نتائج أكثر من الحد المعروض" : ""), MUTED);
@@ -744,6 +770,7 @@ except Exception as e:
         ArrayList<String> actions = new ArrayList<>();
         if (!isDir) { choices.add("عرض / تحرير الملف"); actions.add("edit"); }
         choices.add("معلومات العنصر"); actions.add("stat");
+        if (!isDir) { choices.add("تحرير داخل طرفية Termux (nano/vi)"); actions.add("terminal_edit"); }
         choices.add("نسخ إلى مجلد"); actions.add("copy");
         choices.add("نقل إلى مجلد"); actions.add("move");
         choices.add("إعادة تسمية"); actions.add("rename");
@@ -758,6 +785,7 @@ except Exception as e:
                     switch (ops[which]) {
                         case "edit": openTextFile(path); break;
                         case "stat": showInfo(path); break;
+                        case "terminal_edit": launchTerminalCommand("cd " + shellQuote(parentOf(path)) + " && if command -v nano >/dev/null 2>&1; then nano -- " + shellQuote(new java.io.File(path).getName()) + "; else vi " + shellQuote(new java.io.File(path).getName()) + "; fi", parentOf(path), "تحرير ملف داخل Termux"); break;
                         case "copy": showDestinationDialog(file, false); break;
                         case "move": showDestinationDialog(file, true); break;
                         case "rename": showRenameDialog(file); break;
@@ -781,7 +809,7 @@ except Exception as e:
             }
             if (response.optBoolean("binary", false)) {
                 new AlertDialog.Builder(this).setTitle("ملف ثنائي")
-                        .setMessage("هذا الملف يبدو ثنائيًا وما ينفتح كمحرر نصوص.\nالحجم: " + humanSize(response.optLong("size", 0)))
+                        .setMessage("هذا الملف يبدو ثنائيًا وما ينفتح كمحرر نصوص.\nالحجم: " + humanSize(response.optLong("size", 0)) + "\n\nتقدر تستخدم تشغيل الملف أو فتحه داخل Termux حسب نوعه.")
                         .setPositiveButton("حسنًا", null).show();
                 return;
             }
@@ -999,30 +1027,134 @@ except Exception as e:
 
     private void runFileInTermux(String path) {
         if (!ensureReady()) return;
-        String quoted = "'" + path.replace("'", "'\\''") + "'";
+        String ext = "";
+        String fileName = new java.io.File(path).getName();
+        int dot = fileName.lastIndexOf('.');
+        if (dot >= 0 && dot < fileName.length() - 1) ext = fileName.substring(dot + 1).toLowerCase(java.util.Locale.ROOT);
+        String qFile = shellQuote(fileName);
         String command;
-        if (path.endsWith(".sh")) command = "cd '" + parentOf(path).replace("'", "'\\''") + "' && exec bash " + quoted;
-        else if (path.endsWith(".py")) command = "cd '" + parentOf(path).replace("'", "'\\''") + "' && exec python " + quoted;
-        else if (path.endsWith(".js")) command = "cd '" + parentOf(path).replace("'", "'\\''") + "' && exec node " + quoted;
-        else command = "cd '" + parentOf(path).replace("'", "'\\''") + "' && exec " + quoted;
+        switch (ext) {
+            case "sh": case "bash": command = "bash " + qFile; break;
+            case "zsh": command = "zsh " + qFile; break;
+            case "fish": command = "fish " + qFile; break;
+            case "py": case "pyw": command = "python " + qFile; break;
+            case "js": case "cjs": case "mjs": command = "node " + qFile; break;
+            case "ts": case "tsx": command = "npx --yes tsx " + qFile; break;
+            case "rb": command = "ruby " + qFile; break;
+            case "php": command = "php " + qFile; break;
+            case "pl": command = "perl " + qFile; break;
+            case "lua": command = "lua " + qFile; break;
+            case "r": command = "Rscript " + qFile; break;
+            case "go": command = "go run " + qFile; break;
+            case "swift": command = "swift " + qFile; break;
+            case "hs": command = "runghc " + qFile; break;
+            case "ex": case "exs": command = "elixir " + qFile; break;
+            case "erl": command = "erl -noshell -s " + shellQuote(fileName.substring(0, dot)) + " start -s init stop"; break;
+            case "nim": command = "nim r " + qFile; break;
+            case "zig": command = "zig run " + qFile; break;
+            case "dart": command = "dart run " + qFile; break;
+            case "clj": case "cljs": command = "clojure " + qFile; break;
+            case "m": command = "octave " + qFile; break;
+            case "sql": command = "sqlite3 :memory: < " + qFile; break;
+            case "c": {
+                String output = ".tfm-build-" + fileName.replaceAll("[^A-Za-z0-9_.-]", "_");
+                command = "clang " + qFile + " -o " + shellQuote(output) + " && ./'" + output + "'; code=$?; rm -f " + shellQuote(output) + "; exit $code";
+                break;
+            }
+            case "cc": case "cpp": case "cxx": case "c++": {
+                String output = ".tfm-build-" + fileName.replaceAll("[^A-Za-z0-9_.-]", "_");
+                command = "clang++ " + qFile + " -o " + shellQuote(output) + " && ./'" + output + "'; code=$?; rm -f " + shellQuote(output) + "; exit $code";
+                break;
+            }
+            case "rs": {
+                String output = "/data/data/com.termux/files/usr/tmp/tfm-rust-" + NEXT_ID.incrementAndGet();
+                command = "rustc --edition=2021 " + qFile + " -o " + shellQuote(output) + " && " + shellQuote(output) + "; code=$?; rm -f " + shellQuote(output) + "; exit $code";
+                break;
+            }
+            case "java": command = "javac " + qFile + " && java " + shellQuote(fileName.substring(0, dot)); break;
+            case "kt": {
+                String output = "/data/data/com.termux/files/usr/tmp/tfm-kotlin-" + NEXT_ID.incrementAndGet() + ".jar";
+                command = "kotlinc " + qFile + " -include-runtime -d " + shellQuote(output) + " && java -jar " + shellQuote(output) + "; code=$?; rm -f " + shellQuote(output) + "; exit $code";
+                break;
+            }
+            case "html": case "htm": case "pdf": case "png": case "jpg": case "jpeg": case "webp":
+                new AlertDialog.Builder(this).setTitle("فتح الملف")
+                        .setMessage("هذا النوع يُفتح كتطبيق/مستند، مو كأمر Shell. تقدر تفتح الملف بتطبيق أندرويد أو تستخدم أمرًا مخصصًا من مركز الأدوات.\n\n" + path)
+                        .setPositiveButton("نسخ المسار", (d, w) -> {
+                            ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                            cm.setPrimaryClip(ClipData.newPlainText("path", path));
+                            Toast.makeText(this, "تم نسخ المسار", Toast.LENGTH_SHORT).show();
+                        }).setNegativeButton("إلغاء", null).show();
+                return;
+            default:
+                showCustomRunDialog(path);
+                return;
+        }
+        String fullCommand = "cd " + shellQuote(parentOf(path)) + " && " + command;
         new AlertDialog.Builder(this).setTitle("تشغيل الملف")
-                .setMessage("راح ينفتح Termux ويشغّل الملف داخل جلسة طرفية. شغّل بس الملفات اللي تثق بيها.\n\n" + path)
-                .setPositiveButton("تشغيل", (dialog, which) -> {
-                    try {
-                        Intent intent = new Intent();
-                        intent.setClassName("com.termux", "com.termux.app.RunCommandService");
-                        intent.setAction(RUN_ACTION);
-                        intent.putExtra("com.termux.RUN_COMMAND_PATH", "$PREFIX/bin/bash");
-                        intent.putExtra("com.termux.RUN_COMMAND_ARGUMENTS", new String[]{"-lc", command});
-                        intent.putExtra("com.termux.RUN_COMMAND_WORKDIR", parentOf(path));
-                        intent.putExtra("com.termux.RUN_COMMAND_BACKGROUND", false);
-                        intent.putExtra("com.termux.RUN_COMMAND_SESSION_ACTION", "0");
-                        intent.putExtra("com.termux.RUN_COMMAND_COMMAND_LABEL", "تشغيل ملف من Termux File Manager");
-                        startService(intent);
-                    } catch (Exception e) {
-                        showBridgeError("تعذر تشغيل الملف: " + e.getMessage());
-                    }
+                .setMessage("المشغّل المقترح: " + command + "\n\nراح ينفتح Termux وينفّذ الأمر ضمن مجلد الملف. لازم تكون اللغة أو المترجم مثبتًا داخل Termux. شغّل بس ملفات تثق بيها.\n\n" + path)
+                .setPositiveButton("تشغيل", (dialog, which) -> launchTerminalCommand(fullCommand, parentOf(path), "تشغيل " + fileName))
+                .setNeutralButton("أمر مخصص…", (dialog, which) -> showCustomRunDialog(path))
+                .setNegativeButton("إلغاء", null).show();
+    }
+
+    private void showCustomRunDialog(String path) {
+        String fileName = new java.io.File(path).getName();
+        EditText input = new EditText(this);
+        input.setTextColor(TEXT);
+        input.setHintTextColor(MUTED);
+        input.setTypeface(Typeface.MONOSPACE);
+        input.setSingleLine(false);
+        input.setMinLines(2);
+        input.setText("./" + shellQuote(fileName));
+        input.setSelection(input.length());
+        input.setPadding(dp(10), dp(8), dp(10), dp(8));
+        input.setBackground(round(PANEL, 9, Color.rgb(53, 68, 94)));
+        new AlertDialog.Builder(this).setTitle("أمر تشغيل مخصص")
+                .setMessage("اكتب أمر أي لغة أو أداة مثبتة في Termux. المسار الحالي هو مجلد الملف. مثال: python 'script.py' أو node 'app.js' أو clang 'main.c' -o main && ./main")
+                .setView(input)
+                .setPositiveButton("تشغيل في Termux", (d, w) -> {
+                    String custom = input.getText().toString().trim();
+                    if (!custom.isEmpty()) launchTerminalCommand("cd " + shellQuote(parentOf(path)) + " && " + custom, parentOf(path), "أمر مخصص من مدير الملفات");
                 }).setNegativeButton("إلغاء", null).show();
+    }
+
+    private void launchTerminalCommand(String commandText, String workdir, String label) {
+        if (!ensureReady()) return;
+        try {
+            Intent intent = new Intent();
+            intent.setClassName("com.termux", "com.termux.app.RunCommandService");
+            intent.setAction(RUN_ACTION);
+            intent.putExtra("com.termux.RUN_COMMAND_PATH", "$PREFIX/bin/bash");
+            intent.putExtra("com.termux.RUN_COMMAND_ARGUMENTS", new String[]{"-lc", commandText});
+            intent.putExtra("com.termux.RUN_COMMAND_WORKDIR", workdir == null ? TERMUX_HOME : workdir);
+            intent.putExtra("com.termux.RUN_COMMAND_BACKGROUND", false);
+            intent.putExtra("com.termux.RUN_COMMAND_SESSION_ACTION", "0");
+            intent.putExtra("com.termux.RUN_COMMAND_COMMAND_LABEL", label);
+            intent.putExtra("com.termux.RUN_COMMAND_COMMAND_DESCRIPTION", "تشغيل من Termux File Manager");
+            startService(intent);
+        } catch (Exception e) {
+            showBridgeError("تعذر تشغيل الأمر: " + e.getMessage());
+        }
+    }
+
+    private String shellQuote(String value) {
+        return "'" + value.replace("'", "'\\''") + "'";
+    }
+
+    private void animateListOut() {
+        if (listView == null) return;
+        listView.animate().cancel();
+        listView.animate().alpha(0.72f).translationY(dp(4)).setDuration(75).start();
+    }
+
+    private void animateListIn() {
+        if (listView == null) return;
+        listView.animate().cancel();
+        listView.setAlpha(0.72f);
+        listView.setTranslationY(dp(4));
+        listView.animate().alpha(1f).translationY(0f).setDuration(165)
+                .setInterpolator(new DecelerateInterpolator()).start();
     }
 
     private String parentOf(String path) {

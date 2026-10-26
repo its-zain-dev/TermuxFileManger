@@ -4,6 +4,8 @@ import android.util.Base64;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import java.io.ByteArrayOutputStream;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.io.File;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -41,11 +43,196 @@ public final class AiApiClient {
         int code=conn.getResponseCode(); String retryHeader=conn.getHeaderField("Retry-After"); InputStream in=code>=200&&code<300?conn.getInputStream():conn.getErrorStream(); String raw=readAll(in); conn.disconnect();
         if(code<200||code>=300){String retry="";try{String r=retryHeader;if(r!=null){try{Long.parseLong(r.trim());retry="\nRetry-After: "+r+" ثانية.";}catch(Exception notSeconds){retry="\nRetry-After: "+r+".";}}}catch(Exception ignored){};String msg=extractError(raw);if(code==429)throw new Exception("HTTP 429: حدّ الاستخدام لدى المزوّد. "+msg+retry);if(code==401||code==403)throw new Exception("HTTP "+code+": رفض المزوّد المفتاح أو صلاحياته. تحقق من API key والرصيد والنموذج. "+msg);throw new Exception("HTTP "+code+": "+msg);}
         JSONObject result=new JSONObject(raw);
-        if("gemini".equals(provider.type))return result.getJSONArray("candidates").getJSONObject(0).getJSONObject("content").getJSONArray("parts").optJSONObject(0).optString("text",result.toString());
+        if("gemini".equals(provider.type))return extractGeminiFinal(result);
         if("anthropic".equals(provider.type)){JSONArray a=result.optJSONArray("content");StringBuilder sb=new StringBuilder();if(a!=null)for(int i=0;i<a.length();i++){JSONObject part=a.optJSONObject(i);if(part!=null&&"text".equals(part.optString("type")))sb.append(part.optString("text"));}return sb.toString().trim();}
         if("cohere".equals(provider.type)){JSONArray a=result.optJSONObject("message")!=null?result.optJSONObject("message").optJSONArray("content"):null;StringBuilder sb=new StringBuilder();if(a!=null)for(int i=0;i<a.length();i++)sb.append(a.optJSONObject(i)==null?"":a.optJSONObject(i).optString("text",""));return sb.toString().trim();}
         JSONObject first=result.getJSONArray("choices").getJSONObject(0).getJSONObject("message");Object content=first.opt("content"); if(content instanceof String)return (String)content; if(content instanceof JSONArray){StringBuilder sb=new StringBuilder();JSONArray parts=(JSONArray)content;for(int i=0;i<parts.length();i++)sb.append(parts.optJSONObject(i)==null?"":parts.optJSONObject(i).optString("text",""));return sb.toString().trim();}return first.toString();
     }
+    public interface StreamListener {
+        void onText(String fragment);
+        void onThinking(String fragment);
+    }
+
+    /** Sends a request with SSE streaming. Thinking callbacks contain provider-exposed summaries only. */
+    public static String sendStreaming(android.content.Context context, AiProvider provider, String model, String endpoint,
+            String apiKey, JSONArray conversation, String screenshotPath, int maxTokens, StreamListener listener) throws Exception {
+        if (apiKey == null || apiKey.trim().isEmpty()) throw new Exception("ماكو API key محفوظ لهذا المزوّد. افتح إعدادات الذكاء الاصطناعي وأضف المفتاح.");
+        if (model == null || model.trim().isEmpty()) throw new Exception("حدد اسم النموذج من الإعدادات أولًا.");
+        if (!AiSecureStore.allowRequest(context, provider.id)) throw new Exception("منظّم الاستخدام منع الطلب: بلغت الحد اليومي أو الفاصل الأدنى المحلي. راجع AI Settings أو انتظر قليلًا.");
+        maxTokens = Math.max(128, Math.min(8192, AiSecureStore.settings(context).getInt("output_budget_tokens", 2048)));
+        return sendRawStreaming(context, provider, model, endpoint, apiKey, conversation, screenshotPath, maxTokens, listener);
+    }
+
+    private static String sendRawStreaming(android.content.Context context, AiProvider provider, String model, String endpoint,
+            String apiKey, JSONArray history, String screenshotPath, int maxTokens, StreamListener listener) throws Exception {
+        String image = readImageBase64(screenshotPath);
+        JSONObject body;
+        String address;
+        if ("gemini".equals(provider.type)) {
+            body = geminiBody(context, model, history, image, maxTokens);
+            address = endpoint.replace("{model}", model).replace(":generateContent", ":streamGenerateContent");
+            if (!address.contains("key=")) address += (address.contains("?") ? "&" : "?") + "key=" + URLEncoder.encode(apiKey, "UTF-8");
+            if (!address.contains("alt=sse")) address += (address.contains("?") ? "&" : "?") + "alt=sse";
+        } else if ("anthropic".equals(provider.type)) {
+            body = anthropicBody(context, model, history, image, maxTokens).put("stream", true);
+            address = endpoint;
+        } else if ("cohere".equals(provider.type)) {
+            body = cohereBody(context, model, history, image, maxTokens).put("stream", true);
+            address = endpoint;
+        } else {
+            body = openAiBody(context, model, history, image, maxTokens).put("stream", true);
+            address = endpoint;
+        }
+        URL parsed = new URL(address);
+        if (!"https".equalsIgnoreCase(parsed.getProtocol())) throw new Exception("لأمان مفتاح API، عنوان المزوّد لازم يستخدم HTTPS.");
+        HttpURLConnection conn = (HttpURLConnection) parsed.openConnection();
+        conn.setRequestMethod("POST"); conn.setConnectTimeout(18000); conn.setReadTimeout(90000); conn.setDoOutput(true);
+        conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+        conn.setRequestProperty("Accept", "text/event-stream, application/json");
+        conn.setRequestProperty("Cache-Control", "no-cache");
+        if (!"gemini".equals(provider.type) && !"anthropic".equals(provider.type)) conn.setRequestProperty("Authorization", "Bearer " + apiKey);
+        if ("anthropic".equals(provider.type)) { conn.setRequestProperty("x-api-key", apiKey); conn.setRequestProperty("anthropic-version", "2023-06-01"); }
+        if ("openrouter".equals(provider.id)) { conn.setRequestProperty("HTTP-Referer", "https://github.com/its-zain-dev/TermuxFileManger"); conn.setRequestProperty("X-Title", "Termux File Manager AI Agent"); }
+        byte[] bytes = body.toString().getBytes(StandardCharsets.UTF_8); conn.setFixedLengthStreamingMode(bytes.length);
+        try (OutputStream os = conn.getOutputStream()) { os.write(bytes); }
+        int code = conn.getResponseCode();
+        if (code < 200 || code >= 300) {
+            String raw = readAll(conn.getErrorStream()); conn.disconnect();
+            if (code == 429) throw new Exception("HTTP 429: حدّ الاستخدام لدى المزوّد. " + extractError(raw));
+            throw new Exception("فشل البث من المزوّد (HTTP " + code + "): " + extractError(raw));
+        }
+        StringBuilder finalText = new StringBuilder();
+        StringBuilder sseData = new StringBuilder();
+        StringBuilder nonSse = new StringBuilder();
+        boolean sawData = false;
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (line.startsWith("data:")) {
+                    sawData = true;
+                    String data = line.substring(5).trim();
+                    if (data.equals("[DONE]")) continue;
+                    if (sseData.length() > 0) sseData.append('\n');
+                    sseData.append(data);
+                } else if (line.trim().isEmpty() && sseData.length() > 0) {
+                    emitStreamPayload(provider.type, sseData.toString(), listener, finalText);
+                    sseData.setLength(0);
+                } else if (!sawData && !line.startsWith("event:") && !line.startsWith(":")) {
+                    nonSse.append(line);
+                }
+            }
+        } finally { conn.disconnect(); }
+        if (sseData.length() > 0) emitStreamPayload(provider.type, sseData.toString(), listener, finalText);
+        if (!sawData && nonSse.length() > 0) {
+            // Some OpenAI-compatible gateways ignore stream=true and return one JSON response.
+            JSONObject result = new JSONObject(nonSse.toString());
+            emitFullResponse(provider.type, result, listener, finalText);
+        }
+        return finalText.toString().trim();
+    }
+
+    private static void emitStreamPayload(String providerType, String payload, StreamListener listener, StringBuilder output) {
+        if (payload == null || payload.trim().isEmpty() || payload.trim().equals("[DONE]")) return;
+        try { emitFullResponse(providerType, new JSONObject(payload.trim()), listener, output); }
+        catch (Exception ignored) { }
+    }
+
+    private static void emitFullResponse(String providerType, JSONObject root, StreamListener listener, StringBuilder output) {
+        if ("gemini".equals(providerType)) {
+            JSONArray candidates = root.optJSONArray("candidates");
+            if (candidates == null) return;
+            for (int i=0;i<candidates.length();i++) {
+                JSONObject candidate = candidates.optJSONObject(i);
+                JSONObject content = candidate == null ? null : candidate.optJSONObject("content");
+                JSONArray parts = content == null ? null : content.optJSONArray("parts");
+                if (parts == null) continue;
+                for (int j=0;j<parts.length();j++) {
+                    JSONObject part=parts.optJSONObject(j); if(part==null) continue;
+                    String text=part.optString("text", ""); if(text.isEmpty()) continue;
+                    if(part.optBoolean("thought", false)) emitThinking(text, listener); else emitText(text, listener, output);
+                }
+            }
+            return;
+        }
+        if ("anthropic".equals(providerType)) {
+            JSONObject delta = root.optJSONObject("delta");
+            String type = delta == null ? root.optString("type", "") : delta.optString("type", "");
+            if ("thinking_delta".equals(type)) emitThinking(delta.optString("thinking", ""), listener);
+            else if ("text_delta".equals(type)) emitText(delta.optString("text", ""), listener, output);
+            else if ("content_block_start".equals(root.optString("type", ""))) {
+                JSONObject block=root.optJSONObject("content_block");
+                if(block!=null && "text".equals(block.optString("type"))) emitText(block.optString("text", ""), listener, output);
+                if(block!=null && "thinking".equals(block.optString("type"))) emitThinking(block.optString("thinking", ""), listener);
+            } else if ("message".equals(root.optString("type", ""))) {
+                JSONArray blocks=root.optJSONArray("content");
+                if(blocks!=null) for(int i=0;i<blocks.length();i++){JSONObject block=blocks.optJSONObject(i);if(block==null)continue;if("thinking".equals(block.optString("type")))emitThinking(block.optString("thinking", ""),listener);else if("text".equals(block.optString("type")))emitText(block.optString("text", ""),listener,output);}
+            }
+            return;
+        }
+        if ("cohere".equals(providerType)) {
+            JSONObject delta=root.optJSONObject("delta");
+            JSONObject message=delta==null?null:delta.optJSONObject("message");
+            JSONObject content=message==null?null:message.optJSONObject("content");
+            String text=content==null?"":content.optString("text", "");
+            if(text.isEmpty() && delta!=null) text=delta.optString("text", "");
+            if(text.isEmpty()) text=root.optString("text", "");
+            if(text.isEmpty()) {
+                JSONObject message=root.optJSONObject("message"); JSONArray blocks=message==null?null:message.optJSONArray("content");
+                if(blocks!=null){StringBuilder collected=new StringBuilder();for(int i=0;i<blocks.length();i++){JSONObject block=blocks.optJSONObject(i);if(block!=null)collected.append(block.optString("text", ""));}text=collected.toString();}
+            }
+            emitText(text, listener, output);
+            return;
+        }
+        JSONArray choices=root.optJSONArray("choices");
+        if(choices==null) {
+            // A few OpenAI-compatible vendors use a simple {text: ...} delta envelope.
+            emitText(root.optString("text", ""), listener, output);
+            return;
+        }
+        for(int i=0;i<choices.length();i++) {
+            JSONObject choice=choices.optJSONObject(i); if(choice==null) continue;
+            JSONObject delta=choice.optJSONObject("delta");
+            if(delta==null) delta=choice.optJSONObject("message");
+            if(delta==null) continue;
+            String thought=delta.optString("reasoning_content", delta.optString("reasoning", ""));
+            if(!thought.isEmpty()) emitThinking(thought, listener);
+            Object content=delta.opt("content");
+            if(content instanceof String) emitText((String)content, listener, output);
+            else if(content instanceof JSONArray) {
+                JSONArray parts=(JSONArray)content;
+                for(int j=0;j<parts.length();j++) { JSONObject p=parts.optJSONObject(j); if(p!=null) emitText(p.optString("text", ""), listener, output); }
+            }
+        }
+    }
+
+    private static void emitText(String text, StreamListener listener, StringBuilder output) {
+        if(text==null || text.isEmpty()) return;
+        output.append(text);
+        if(listener!=null) try { listener.onText(text); } catch(Exception ignored) { }
+    }
+
+    private static void emitThinking(String text, StreamListener listener) {
+        if(text==null || text.isEmpty() || listener==null) return;
+        try { listener.onThinking(text); } catch(Exception ignored) { }
+    }
+
+    private static String extractGeminiFinal(JSONObject result) {
+        StringBuilder text = new StringBuilder();
+        try {
+            JSONArray candidates = result.optJSONArray("candidates");
+            if(candidates!=null) for(int i=0;i<candidates.length();i++) {
+                JSONObject candidate=candidates.optJSONObject(i);
+                JSONObject content=candidate==null?null:candidate.optJSONObject("content");
+                JSONArray parts=content==null?null:content.optJSONArray("parts");
+                if(parts!=null) for(int j=0;j<parts.length();j++) {
+                    JSONObject part=parts.optJSONObject(j);
+                    if(part!=null && !part.optBoolean("thought",false)) text.append(part.optString("text", ""));
+                }
+            }
+        } catch(Exception ignored) { }
+        return text.length()==0 ? result.toString() : text.toString().trim();
+    }
+
     public static java.util.List<String> fetchModels(AiProvider provider,String endpoint,String apiKey)throws Exception{
         if(apiKey==null||apiKey.trim().isEmpty())throw new Exception("احفظ مفتاح API أولًا.");
         String url; if("gemini".equals(provider.type)){int at=endpoint.indexOf("/models/");if(at<0)throw new Exception("عنوان Gemini يجب أن يحتوي /models/{model}:generateContent");url=endpoint.substring(0,at)+"/models?key="+URLEncoder.encode(apiKey,"UTF-8");}
@@ -79,8 +266,22 @@ public final class AiApiClient {
         JSONObject body=new JSONObject().put("systemInstruction",new JSONObject().put("parts",new JSONArray().put(new JSONObject().put("text",systemPrompt(context)))));JSONArray contents=new JSONArray();
         for(int i=0;i<history.length();i++){JSONObject m=history.optJSONObject(i);if(m==null)continue;String role="assistant".equals(m.optString("role"))?"model":"user";JSONArray parts=new JSONArray().put(new JSONObject().put("text",m.optString("text","")));if(!image.isEmpty()&&i==history.length()-1&&"user".equals(role))parts.put(new JSONObject().put("inline_data",new JSONObject().put("mime_type","image/jpeg").put("data",image)));contents.put(new JSONObject().put("role",role).put("parts",parts));}
         JSONObject generation = new JSONObject().put("maxOutputTokens",Math.max(128,Math.min(8192,maxTokens))).put("temperature",0.35);
-        int thinkingBudget = Math.max(0, Math.min(8192, AiSecureStore.settings(context).getInt("thinking_budget_tokens", 0)));
-        if (thinkingBudget > 0) generation.put("thinkingConfig", new JSONObject().put("thinkingBudget", Math.min(thinkingBudget, Math.max(0, maxTokens - 128))));
+        android.content.SharedPreferences prefs = AiSecureStore.settings(context);
+        int thinkingBudget = Math.max(0, Math.min(8192, prefs.getInt("thinking_budget_tokens", 0)));
+        String modelId = model == null ? "" : model.toLowerCase(java.util.Locale.ROOT);
+        JSONObject thinkingConfig = new JSONObject();
+        if (modelId.contains("gemini-3.") || modelId.contains("gemini-3-") || modelId.contains("gemini-4.") || modelId.contains("gemini-4-")) {
+            String level = prefs.getString("thinking_level", "medium");
+            if (!"minimal".equals(level) && !"low".equals(level) && !"medium".equals(level) && !"high".equals(level)) level = "medium";
+            thinkingConfig.put("includeThoughts", true).put("thinkingLevel", level);
+            generation.put("thinkingConfig", thinkingConfig);
+        } else if (modelId.contains("gemini-2.5")) {
+            thinkingConfig.put("includeThoughts", true);
+            if (thinkingBudget > 0) thinkingConfig.put("thinkingBudget", Math.min(thinkingBudget, Math.max(0, maxTokens - 128)));
+            generation.put("thinkingConfig", thinkingConfig);
+        } else if (thinkingBudget > 0) {
+            generation.put("thinkingConfig", new JSONObject().put("thinkingBudget", Math.min(thinkingBudget, Math.max(0, maxTokens - 128))));
+        }
         body.put("contents",contents).put("generationConfig",generation);return body;
     }
     private static String systemPrompt(android.content.Context context) {
@@ -115,6 +316,8 @@ public final class AiApiClient {
         if (!customSystem.isEmpty()) prompt.append("\n\n[USER-CUSTOM SYSTEM PROMPT]\n").append(customSystem);
         if (!instructions.isEmpty()) prompt.append("\n\n[USER AGENT INSTRUCTIONS]\n").append(instructions);
         prompt.append("\n\n[SKILL REGISTRY]\n").append(skills);
+        prompt.append("\n\n[AUTOMATIC SKILL SELECTION]\n")
+                .append("You must consider installed skills automatically for every request; the user does not need to type /skill-name. Match the task against each skill description and its stated triggers. If one skill materially applies, load its full instructions first by returning ONLY this JSON action: {\"tfm_action\":{\"tool\":\"activate_skill\",\"name\":\"skill-name\",\"reason\":\"why it matches\"}}. This local read-only operation needs no shell permission. Do not activate unrelated skills or stack multiple skills unless genuinely needed. After the skill is loaded, continue the user's actual task and use tools as needed. If history already contains the full content under a tool output labeled Agent Skill /name, do not activate that same skill again; apply it and proceed. Never claim to have loaded a skill unless its content was provided in the tool result.");
         return prompt.toString();
     }
 

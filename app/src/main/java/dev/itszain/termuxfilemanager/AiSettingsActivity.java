@@ -35,7 +35,7 @@ public class AiSettingsActivity extends Activity {
     private UiTheme theme; private int BG,PANEL,PANEL2,TEXT,MUTED,ACCENT,DANGER,DIVIDER;
     private Spinner providerSpinner,themeSpinner; private EditText keyInput,modelInput,endpointInput,dailyInput,gapInput;
     private EditText agentSystemPromptInput,agentInstructionsInput,skillNameInput,skillUrlInput,agentAutoMaxStepsInput;
-    private EditText thinkingBudgetInput,outputBudgetInput;
+    private EditText thinkingBudgetInput,outputBudgetInput; private Spinner thinkingLevelSpinner;
     private final ExecutorService worker=Executors.newSingleThreadExecutor();
     private List<AiProvider> providers;
     @Override public void onCreate(Bundle b){super.onCreate(b);initTheme();UiTheme.applyWindow(this);getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);build();}
@@ -63,8 +63,17 @@ public class AiSettingsActivity extends Activity {
         outputBudgetInput.setInputType(InputType.TYPE_CLASS_NUMBER);
         outputBudgetInput.setText(String.valueOf(AiSecureStore.settings(this).getInt("output_budget_tokens",2048)));
         body.addView(thinkingBudgetInput,match()); body.addView(outputBudgetInput,match());
+        body.addView(label("Gemini 3.x thinking level"));
+        final String[] thinkingLevels={"minimal","low","medium","high"};
+        final String[] thinkingLevelLabels={"Minimal — أسرع","Low — تفكير خفيف","Medium — متوازن","High — أعمق"};
+        thinkingLevelSpinner=new Spinner(this);
+        thinkingLevelSpinner.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,thinkingLevelLabels));
+        String savedLevel=AiSecureStore.settings(this).getString("thinking_level","medium");
+        int levelIndex=1; for(int i=0;i<thinkingLevels.length;i++) if(thinkingLevels[i].equals(savedLevel)) levelIndex=i;
+        thinkingLevelSpinner.setSelection(levelIndex); body.addView(thinkingLevelSpinner,match());
+        body.addView(note("Gemini 3.x يستخدم thinkingLevel، بينما بعض النماذج الأقدم تستخدم thinkingBudget. ما يعرضه التطبيق هو ملخص التفكير الذي يتيحه المزوّد، وليس سجل التفكير الداخلي الكامل."));
         Button saveBudgets=button("حفظ ميزانيات AI",PANEL2,ACCENT);
-        saveBudgets.setOnClickListener(v->{int thinking=parse(thinkingBudgetInput.getText().toString(),0,0,8192);int output=parse(outputBudgetInput.getText().toString(),2048,128,8192);AiSecureStore.settings(this).edit().putInt("thinking_budget_tokens",thinking).putInt("output_budget_tokens",output).apply();Toast.makeText(this,"انحفظت ميزانيات AI",Toast.LENGTH_SHORT).show();});
+        saveBudgets.setOnClickListener(v->{int thinking=parse(thinkingBudgetInput.getText().toString(),0,0,8192);int output=parse(outputBudgetInput.getText().toString(),2048,128,8192);int ix=Math.max(0,Math.min(thinkingLevels.length-1,thinkingLevelSpinner.getSelectedItemPosition()));AiSecureStore.settings(this).edit().putInt("thinking_budget_tokens",thinking).putInt("output_budget_tokens",output).putString("thinking_level",thinkingLevels[ix]).apply();Toast.makeText(this,"انحفظت ميزانيات AI ومستوى التفكير",Toast.LENGTH_SHORT).show();});
         body.addView(saveBudgets,match());
         buildAgentOptions(body);
         body.addView(section("Termux"));body.addView(note("إدارة الحزم والمكتبات وتشغيل الأوامر تتم من خلال Termux RUN_COMMAND، بصلاحيات مستخدم Termux فقط. الأوامر المؤثرة تعرض تأكيدًا قبل تنفيذها."));Button link=button("إعداد الربط مع Termux",PANEL2,ACCENT);link.setOnClickListener(v->showTermuxLinkDialog());body.addView(link,match());Button appPerm=button("فتح إعدادات صلاحيات التطبيق",PANEL2,TEXT);appPerm.setOnClickListener(v->{try{startActivity(new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,Uri.parse("package:"+getPackageName())));}catch(Exception e){alert("افتح إعدادات أندرويد > التطبيقات > Termux File Manager.");}});body.addView(appPerm,match());Button tools=button("فتح مركز الأدوات",PANEL2,TEXT);tools.setOnClickListener(v->startActivity(new Intent(this,ToolsActivity.class)));body.addView(tools,match());Button sessions=button("جلسات Terminal و TUI",PANEL2,TEXT);sessions.setOnClickListener(v->startActivity(new Intent(this,TerminalSessionsActivity.class)));body.addView(sessions,match());

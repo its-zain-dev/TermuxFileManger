@@ -45,7 +45,7 @@ public final class AgentSkillManager {
     public static String catalog(Context context) {
         JSONArray skills = loadAll(context);
         if (skills.length() == 0) return "No Agent Skills are installed. If the user provides a skill URL or asks to install one, use the install_skill tool. Skills are invoked with /skill-name.";
-        StringBuilder out = new StringBuilder("Installed Agent Skills (invoke by typing /name at the start of a user message):\n");
+        StringBuilder out = new StringBuilder("Installed Agent Skills. Auto-select when relevant; /name remains an explicit override:\n");
         for (int i = 0; i < skills.length(); i++) {
             JSONObject skill = skills.optJSONObject(i);
             if (skill == null) continue;
@@ -76,7 +76,7 @@ public final class AgentSkillManager {
 
     public static InstallResult installFromUrl(Context context, String source, String requestedName) throws Exception {
         if (source == null || source.trim().isEmpty()) throw new Exception("رابط المهارة فارغ.");
-        source = source.trim();
+        source = source.replaceAll("[\\u200B-\\u200F\\u202A-\\u202E\\u2060\\uFEFF]", "").trim();
         if (!source.startsWith("https://")) throw new Exception("يُقبل HTTPS فقط.");
         String markdown = fetchSkill(source);
         if (markdown.trim().isEmpty()) throw new Exception("ملف SKILL.md فارغ.");
@@ -114,6 +114,18 @@ public final class AgentSkillManager {
         URL url = new URL(source);
         if (!"https".equalsIgnoreCase(url.getProtocol())) throw new Exception("يُقبل HTTPS فقط.");
         String host = url.getHost().toLowerCase(Locale.ROOT);
+        if (host.equals("raw.githubusercontent.com")) {
+            String normalized = normalizeRawGitHubUrl(source);
+            try {
+                return httpText(normalized);
+            } catch (Exception first) {
+                try {
+                    return fetchGitHubRawViaApi(normalized);
+                } catch (Exception second) {
+                    throw new Exception("تعذر تنزيل SKILL.md من GitHub بعد تجربة الرابط الخام وواجهة GitHub API. الرابط: " + normalized + " | " + first.getMessage() + " | " + second.getMessage());
+                }
+            }
+        }
         if (host.equals("github.com")) {
             String[] p = url.getPath().replaceAll("^/+|/+$", "").split("/");
             if (p.length < 2) throw new Exception("رابط GitHub لازم يحتوي owner/repository.");
@@ -140,6 +152,42 @@ public final class AgentSkillManager {
         }
         // Raw GitHub, direct SKILL.md links, and HTTPS Markdown URLs from other agents are accepted.
         return httpText(source);
+    }
+
+    /** Converts raw.githubusercontent.com URLs that contain /refs/heads/branch/ into canonical raw URLs. */
+    private static String normalizeRawGitHubUrl(String source) throws Exception {
+        URL url = new URL(source);
+        String[] p = url.getPath().replaceAll("^/+|/+$", "").split("/");
+        if (p.length >= 6 && p[2].equals("refs") && (p[3].equals("heads") || p[3].equals("tags"))) {
+            StringBuilder out = new StringBuilder("https://raw.githubusercontent.com/").append(p[0]).append('/').append(p[1]).append('/').append(p[4]);
+            for (int i = 5; i < p.length; i++) out.append('/').append(p[i]);
+            return out.toString();
+        }
+        return source;
+    }
+
+    /** Uses GitHub's contents API when a raw URL is missing or GitHub changes its raw URL handling. */
+    private static String fetchGitHubRawViaApi(String normalized) throws Exception {
+        URL url = new URL(normalized);
+        String[] p = url.getPath().replaceAll("^/+|/+$", "").split("/");
+        if (p.length < 4) throw new Exception("رابط raw GitHub لا يحتوي owner/repository/branch/file.");
+        String owner = p[0], repo = p[1], branch = p[2];
+        StringBuilder filePath = new StringBuilder();
+        for (int i = 3; i < p.length; i++) filePath.append(filePath.length() == 0 ? "" : "/").append(p[i]);
+        String api = "https://api.github.com/repos/" + owner + "/" + repo + "/contents/" + encodePath(filePath.toString())
+                + "?ref=" + URLEncoder.encode(branch, "UTF-8");
+        String jsonText = httpText(api);
+        JSONObject file = new JSONObject(jsonText);
+        String download = file.optString("download_url", "");
+        if (!download.isEmpty()) return httpText(normalizeRawGitHubUrl(download));
+        String encoded = file.optString("content", "").replace("\\n", "").trim();
+        if (!encoded.isEmpty()) return new String(Base64.decode(encoded, Base64.DEFAULT), StandardCharsets.UTF_8);
+        throw new Exception("GitHub API لم يُرجع محتوى الملف المطلوب.");
+    }
+
+    public static JSONObject findInstalled(Context context, String name) {
+        if (name == null) return null;
+        return find(context, name.trim());
     }
 
     private static String encodePath(String path) throws Exception {

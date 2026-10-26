@@ -3,6 +3,10 @@ package dev.itszain.termuxfilemanager;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.IntentFilter;
+import android.os.Build;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Typeface;
@@ -21,26 +25,34 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import java.util.Locale;
+import java.util.HashMap;
+import java.util.Map;
 
 /** Command center for Termux: commands, packages, libraries and runtime diagnostics. */
 public class ToolsActivity extends Activity {
-    private static final int BG = Color.rgb(11, 16, 32);
-    private static final int PANEL = Color.rgb(20, 28, 48);
-    private static final int PANEL_2 = Color.rgb(28, 38, 62);
-    private static final int TEXT = Color.rgb(239, 244, 255);
-    private static final int MUTED = Color.rgb(153, 168, 195);
-    private static final int ACCENT = Color.rgb(116, 224, 196);
+    private int BG, PANEL, PANEL_2, TEXT, MUTED, ACCENT;
+    private String lastThemeName="midnight";
     private EditText commandInput;
     private EditText workdirInput;
+    private TextView outputView;
+    private boolean receiverRegistered=false;
+    private final Map<Integer,String> requests=new HashMap<>();
+    private final BroadcastReceiver resultReceiver=new BroadcastReceiver(){@Override public void onReceive(Context c,Intent i){int id=i.getIntExtra(CommandResultService.EXTRA_REQUEST_ID,-1);String label=requests.remove(id);if(label==null)return;String out=i.getStringExtra("stdout"),err=i.getStringExtra("stderr");int code=i.getIntExtra("exit_code",0);String block="\n\n=== "+label+" | exit="+code+" ===\n"+(out==null?"":out)+(err==null||err.trim().isEmpty()?"":"\n[stderr]\n"+err);outputView.append(block);if(outputView.length()>22000)outputView.setText(outputView.getText().subSequence(outputView.length()-18000,outputView.length()));}};
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        UiTheme palette=UiTheme.get(this); BG=palette.bg; PANEL=palette.panel; PANEL_2=palette.panel2; TEXT=palette.text; MUTED=palette.muted; ACCENT=palette.accent; lastThemeName=UiTheme.getName(this);
         getWindow().setStatusBarColor(BG);
         getWindow().setNavigationBarColor(BG);
+        UiTheme.applyWindow(this);
         getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
         buildUi();
+        IntentFilter filter=new IntentFilter(CommandResultService.ACTION_RESULT); if(Build.VERSION.SDK_INT>=33)registerReceiver(resultReceiver,filter,Context.RECEIVER_NOT_EXPORTED);else registerReceiver(resultReceiver,filter);receiverRegistered=true;
     }
+
+    @Override protected void onResume(){super.onResume();String now=UiTheme.getName(this);if(lastThemeName!=null&&!lastThemeName.equals(now))recreate();}
+    @Override protected void onDestroy(){if(receiverRegistered)try{unregisterReceiver(resultReceiver);}catch(Exception ignored){}super.onDestroy();}
 
     private void buildUi() {
         LinearLayout root = new LinearLayout(this);
@@ -64,6 +76,10 @@ public class ToolsActivity extends Activity {
         subtitle.setGravity(Gravity.TOP | Gravity.START);
         subtitle.setPadding(dp(3), dp(4), dp(3), dp(12));
         root.addView(subtitle);
+        LinearLayout workspace = new LinearLayout(this); workspace.setGravity(Gravity.CENTER_VERTICAL);
+        Button sessionsButton=button("Terminal Sessions / TUI",PANEL_2,TEXT); sessionsButton.setOnClickListener(v->startActivity(new Intent(this,TerminalSessionsActivity.class)));
+        Button settingsButton=button("الإعدادات",PANEL_2,TEXT); settingsButton.setOnClickListener(v->startActivity(new Intent(this,AiSettingsActivity.class)));
+        workspace.addView(sessionsButton,new LinearLayout.LayoutParams(0,dp(40),1)); LinearLayout.LayoutParams setLp=new LinearLayout.LayoutParams(dp(90),dp(40));setLp.leftMargin=dp(5);workspace.addView(settingsButton,setLp);root.addView(workspace);
 
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(false);
@@ -112,6 +128,7 @@ public class ToolsActivity extends Activity {
         runLp.topMargin = dp(12);
         commandCard.addView(run, runLp);
         run.setOnClickListener(v -> confirmAndRun(commandInput.getText().toString(), workdirInput.getText().toString(), "أمر من مركز الأدوات"));
+        outputView=text("مخرجات التنفيذ تظهر هنا داخل التطبيق.",11,TEXT,false); outputView.setTypeface(Typeface.MONOSPACE); outputView.setTextIsSelectable(true); outputView.setGravity(Gravity.TOP|Gravity.START); outputView.setPadding(dp(8),dp(8),dp(8),dp(8)); outputView.setBackground(round(PANEL,9,Color.rgb(42,53,77))); LinearLayout.LayoutParams outLp=matchWrap();outLp.topMargin=dp(9);commandCard.addView(outputView,new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(118)));
         content.addView(commandCard);
 
         content.addView(sectionTitle("الحزم والمكتبات"));
@@ -122,6 +139,10 @@ public class ToolsActivity extends Activity {
         addAction(pkgCard, "أدوات Rust (cargo)", "تثبيت أداة Rust أو مكتبة من crates.io", () -> showInstallDialog("Rust / Cargo", "cargo install", "اسم الأداة"));
         addAction(pkgCard, "أدوات Ruby (gem)", "تثبيت Gems", () -> showInstallDialog("Ruby / gem", "gem install", "اسم الحزمة"));
         addAction(pkgCard, "أدوات Go", "تثبيت أداة Go عبر go install", () -> showInstallDialog("Go", "go install", "اسم الحزمة الكامل مثل example.com/tool@latest"));
+        addAction(pkgCard, "حزم pnpm / yarn / bun", "إدارة مكتبات JavaScript باستخدام مدير الحزم المثبت", () -> showInstallDialog("Node.js packages", "npm install", "اسم المكتبة"));
+        addAction(pkgCard, "Lua / luarocks", "تثبيت مكتبة Lua إذا كانت luarocks مثبتة", () -> showInstallDialog("LuaRocks", "luarocks install", "اسم المكتبة"));
+        addAction(pkgCard, "PHP / Composer", "تثبيت مكتبة PHP داخل المشروع إذا كان Composer متاحًا", () -> showInstallDialog("Composer", "composer require", "vendor/package"));
+        addAction(pkgCard, "تنزيل ملف من رابط HTTPS", "تنزيل ملفات أو أرشيفات مباشرة إلى مسار تختاره", () -> showDownloadDialog());
         content.addView(pkgCard);
 
         content.addView(sectionTitle("اللغات والتشخيص"));
@@ -130,13 +151,14 @@ public class ToolsActivity extends Activity {
         addAction(runtimes, "ملخص النظام والتخزين", "إصدار Termux، معمارية الجهاز، مساحة التخزين والذاكرة", () -> setCommandAndRun(systemCheck(), "~/", "تشخيص Termux"));
         addAction(runtimes, "قائمة الحزم المثبتة", "يعرض قائمة حزم Termux المثبتة", () -> setCommandAndRun("pkg list-installed", "~/", "الحزم المثبتة"));
         addAction(runtimes, "تحديث مستودعات الحزم", "يشغّل pkg update داخل جلسة Termux تفاعلية", () -> confirmAndRun("pkg update", "~/", "تحديث مستودعات Termux"));
-        addAction(runtimes, "ترقية الحزم", "قد يسألك Termux عن التأكيد أثناء الترقية", () -> confirmAndRun("pkg upgrade", "~/", "ترقية حزم Termux"));
+        addAction(runtimes, "ترقية الحزم", "تحديث الحزم مع قبول التأكيد الافتراضي (-y)", () -> confirmAndRun("pkg upgrade -y", "~/", "ترقية حزم Termux"));
         content.addView(runtimes);
 
         content.addView(sectionTitle("ملفات ومشاريع"));
         LinearLayout projectCard = card();
         addAction(projectCard, "ضغط مجلد بصيغة tar.gz", "يطلب مسار المصدر واسم الأرشيف", () -> showArchiveDialog());
         addAction(projectCard, "فك أرشيف tar.gz أو zip", "يفك الملفات داخل مجلد تحدده", () -> showExtractDialog());
+        addAction(projectCard, "تنزيل ملف من الإنترنت", "يدعم HTTPS ويعرض النتيجة هنا", () -> showDownloadDialog());
         addAction(projectCard, "فتح جلسة Shell في المجلد", "يفتح Termux على مسار العمل المحدد", () -> confirmAndRun("exec bash -l", workdirInput.getText().toString(), "جلسة Shell من مدير الملفات"));
         content.addView(projectCard);
 
@@ -151,8 +173,8 @@ public class ToolsActivity extends Activity {
         new AlertDialog.Builder(this).setTitle("مدير حزم Termux").setItems(items, (d, which) -> {
             switch (which) {
                 case 0: showPackageNameDialog("بحث عن حزمة", "pkg search", "جزء من اسم الحزمة"); break;
-                case 1: showPackageNameDialog("تثبيت حزمة", "pkg install", "اسم الحزمة"); break;
-                case 2: confirmAndRun("pkg update && pkg upgrade", "~/", "تحديث وترقية Termux"); break;
+                case 1: showPackageNameDialog("تثبيت حزمة", "pkg install -y", "اسم الحزمة"); break;
+                case 2: confirmAndRun("pkg update && pkg upgrade -y", "~/", "تحديث وترقية Termux"); break;
                 case 3: confirmAndRun("pkg update", "~/", "تحديث فهرس الحزم"); break;
                 case 4: setCommandAndRun("pkg list-installed", "~/", "الحزم المثبتة"); break;
                 case 5: setCommandAndRun("pkg --help", "~/", "مساعدة pkg"); break;
@@ -214,6 +236,8 @@ public class ToolsActivity extends Activity {
         }).setNegativeButton("إلغاء", null).show();
     }
 
+    private void showDownloadDialog(){LinearLayout layout=new LinearLayout(this);layout.setOrientation(LinearLayout.VERTICAL);EditText url=input("رابط HTTPS للملف");EditText dest=input("مسار الوجهة مثل ~/Downloads/file.zip");url.setText("https://");dest.setText("~/Downloads/download.bin");layout.addView(url,matchWrap());layout.addView(dest,matchWrap());new AlertDialog.Builder(this).setTitle("تنزيل ملف").setMessage("يتطلب هذا الإجراء اتصالًا مباشرًا من Termux. استخدم الروابط التي تثق بها فقط.").setView(layout).setPositiveButton("تنزيل",(d,w)->{String u=url.getText().toString().trim(),to=dest.getText().toString().trim();if(!u.startsWith("https://")){new AlertDialog.Builder(this).setMessage("استخدم رابط HTTPS فقط.").setPositiveButton("حسنًا",null).show();return;}if(to.isEmpty())return;String cmd="mkdir -p \"$(dirname "+shellPath(to)+")\" && curl -fL --show-error --retry 2 "+shellQuote(u)+" -o "+shellPath(to)+" && ls -lh "+shellPath(to);confirmAndRun(cmd, "~/", "تنزيل ملف HTTPS");}).setNegativeButton("إلغاء",null).show();}
+
     private void setCommandAndRun(String command, String workdir, String label) {
         commandInput.setText(command);
         workdirInput.setText(workdir);
@@ -246,18 +270,10 @@ public class ToolsActivity extends Activity {
 
     private void launchCommand(String commandText, String workdir, String label) {
         try {
-            Intent command = new Intent();
-            command.setClassName("com.termux", "com.termux.app.RunCommandService");
-            command.setAction("com.termux.RUN_COMMAND");
-            command.putExtra("com.termux.RUN_COMMAND_PATH", "$PREFIX/bin/bash");
-            command.putExtra("com.termux.RUN_COMMAND_ARGUMENTS", new String[]{"-lc", commandText});
-            command.putExtra("com.termux.RUN_COMMAND_WORKDIR", workdir);
-            command.putExtra("com.termux.RUN_COMMAND_BACKGROUND", false);
-            command.putExtra("com.termux.RUN_COMMAND_SESSION_ACTION", "0");
-            command.putExtra("com.termux.RUN_COMMAND_COMMAND_LABEL", label);
-            command.putExtra("com.termux.RUN_COMMAND_COMMAND_DESCRIPTION", "أمر بدأه المستخدم من مركز أدوات Termux File Manager.");
-            startService(command);
-            Toast.makeText(this, "تم إرسال الأمر إلى Termux", Toast.LENGTH_SHORT).show();
+            if(outputView!=null)outputView.append("\n\n$ "+commandText+"\n[قيد التنفيذ…]");
+            boolean interactive=commandText.trim().equals("exec bash -l");
+            if(interactive){TermuxCommandRunner.openTui(this,commandText,workdir,label);Toast.makeText(this,"فُتحت جلسة Termux تفاعلية",Toast.LENGTH_SHORT).show();return;}
+            int request=TermuxCommandRunner.run(this,commandText,workdir,label,true);requests.put(request,label);
         } catch (Exception e) {
             new AlertDialog.Builder(this).setTitle("تعذر تشغيل الأمر").setMessage(String.valueOf(e.getMessage())).setPositiveButton("حسنًا", null).show();
         }

@@ -13,14 +13,12 @@ import android.widget.TextView;
 /** Android text-selection action: lets the user run selected shell text in Termux. */
 public class ProcessTextActivity extends Activity {
     private String selectedCode = "";
-    private static final int BG = Color.rgb(11, 16, 32);
-    private static final int TEXT = Color.rgb(239, 244, 255);
-    private static final int MUTED = Color.rgb(153, 168, 195);
-    private static final int ACCENT = Color.rgb(116, 224, 196);
+    private int BG, TEXT, MUTED, ACCENT;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        UiTheme palette=UiTheme.get(this); BG=palette.bg; TEXT=palette.text; MUTED=palette.muted; ACCENT=palette.accent;
         Window window = getWindow();
         window.setStatusBarColor(BG);
         window.setNavigationBarColor(BG);
@@ -79,17 +77,7 @@ public class ProcessTextActivity extends Activity {
 
     private void runSelectedCode() {
         try {
-            Intent command = new Intent();
-            command.setClassName("com.termux", "com.termux.app.RunCommandService");
-            command.setAction("com.termux.RUN_COMMAND");
-            command.putExtra("com.termux.RUN_COMMAND_PATH", "$PREFIX/bin/bash");
-            command.putExtra("com.termux.RUN_COMMAND_ARGUMENTS", new String[]{"-lc", selectedCode});
-            command.putExtra("com.termux.RUN_COMMAND_WORKDIR", "~/");
-            command.putExtra("com.termux.RUN_COMMAND_BACKGROUND", false);
-            command.putExtra("com.termux.RUN_COMMAND_SESSION_ACTION", "0");
-            command.putExtra("com.termux.RUN_COMMAND_COMMAND_LABEL", "RUN CODE ON TERMUX");
-            command.putExtra("com.termux.RUN_COMMAND_COMMAND_DESCRIPTION", "نص محدد من قائمة إجراءات تحديد النص في أندرويد.");
-            startService(command);
+            TermuxCommandRunner.run(this, selectedCode, "~/", "RUN CODE ON TERMUX", false);
         } catch (Exception e) {
             new AlertDialog.Builder(this)
                     .setTitle("تعذر إرسال الأمر إلى Termux")

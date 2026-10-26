@@ -46,13 +46,8 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class MainActivity extends Activity {
-    private static final int BG = Color.rgb(11, 16, 32);
-    private static final int PANEL = Color.rgb(20, 28, 48);
-    private static final int PANEL_2 = Color.rgb(28, 38, 62);
-    private static final int TEXT = Color.rgb(239, 244, 255);
-    private static final int MUTED = Color.rgb(153, 168, 195);
-    private static final int ACCENT = Color.rgb(116, 224, 196);
-    private static final int DANGER = Color.rgb(255, 112, 129);
+    private int BG, PANEL, PANEL_2, TEXT, MUTED, ACCENT, DANGER;
+    private String lastThemeName = "midnight";
     private static final String TERMUX_HOME = "/data/data/com.termux/files/home";
     private static final String TERMUX_PREFIX = "/data/data/com.termux/files/usr";
     private static final String RUN_ACTION = "com.termux.RUN_COMMAND";
@@ -360,8 +355,10 @@ except Exception as e:
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        UiTheme palette = UiTheme.get(this); BG=palette.bg; PANEL=palette.panel; PANEL_2=palette.panel2; TEXT=palette.text; MUTED=palette.muted; ACCENT=palette.accent; DANGER=palette.danger; lastThemeName=UiTheme.getName(this);
         getWindow().setStatusBarColor(BG);
         getWindow().setNavigationBarColor(BG);
+        UiTheme.applyWindow(this);
         getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
         buildUi();
         IntentFilter filter = new IntentFilter(RESULT_ACTION);
@@ -379,6 +376,9 @@ except Exception as e:
             loadDirectory(currentPath, false);
         }
     }
+
+    @Override
+    protected void onResume() { super.onResume(); String current=UiTheme.getName(this); if(lastThemeName!=null&&!lastThemeName.equals(current)){recreate();} }
 
     @Override
     protected void onDestroy() {
@@ -412,16 +412,20 @@ except Exception as e:
         top.setOrientation(LinearLayout.HORIZONTAL);
         TextView title = text("TFM  |  مدير ملفات Termux", 19, TEXT, true);
         top.addView(title, new LinearLayout.LayoutParams(0, dp(48), 1));
+        Button aiHub = button("AI ★", PANEL, TEXT);
+        aiHub.setTextSize(11);
+        aiHub.setOnClickListener(v -> { startActivity(new Intent(this, AiAssistantActivity.class)); overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out); });
+        top.addView(aiHub, new LinearLayout.LayoutParams(dp(52), dp(40)));
         Button toolsHub = button("الأدوات", PANEL_2, ACCENT);
         toolsHub.setOnClickListener(v -> {
             startActivity(new Intent(this, ToolsActivity.class));
             overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out);
         });
-        top.addView(toolsHub, new LinearLayout.LayoutParams(dp(70), dp(40)));
+        LinearLayout.LayoutParams thlp = new LinearLayout.LayoutParams(dp(62), dp(40)); thlp.leftMargin=dp(4); top.addView(toolsHub, thlp);
         Button help = button("الربط", PANEL_2, ACCENT);
         help.setOnClickListener(v -> showHelpDialog(false));
-        LinearLayout.LayoutParams helpLp = new LinearLayout.LayoutParams(dp(62), dp(40));
-        helpLp.leftMargin = dp(5);
+        LinearLayout.LayoutParams helpLp = new LinearLayout.LayoutParams(dp(50), dp(40));
+        helpLp.leftMargin = dp(4);
         top.addView(help, helpLp);
         root.addView(top);
 

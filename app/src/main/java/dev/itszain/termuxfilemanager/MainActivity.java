@@ -509,7 +509,6 @@ except Exception as e:
         listView.setCacheColorHint(Color.TRANSPARENT);
         listView.setBackgroundColor(BG);
         listView.setSelector(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
-        listView.setItemViewCacheSize(8);
         adapter = new FileAdapter();
         listView.setAdapter(adapter);
         listView.setOnItemClickListener((parent, view, position, id) -> onFileClicked(files.get(position)));

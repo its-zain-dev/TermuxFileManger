@@ -177,7 +177,7 @@ public final class AiApiClient {
             if(text.isEmpty() && delta!=null) text=delta.optString("text", "");
             if(text.isEmpty()) text=root.optString("text", "");
             if(text.isEmpty()) {
-                JSONObject message=root.optJSONObject("message"); JSONArray blocks=message==null?null:message.optJSONArray("content");
+                JSONObject messageRoot=root.optJSONObject("message"); JSONArray blocks=messageRoot==null?null:messageRoot.optJSONArray("content");
                 if(blocks!=null){StringBuilder collected=new StringBuilder();for(int i=0;i<blocks.length();i++){JSONObject block=blocks.optJSONObject(i);if(block!=null)collected.append(block.optString("text", ""));}text=collected.toString();}
             }
             emitText(text, listener, output);

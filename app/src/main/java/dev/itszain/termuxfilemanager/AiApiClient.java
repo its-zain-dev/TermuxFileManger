@@ -19,6 +19,7 @@ public final class AiApiClient {
         if(apiKey==null||apiKey.trim().isEmpty())throw new Exception("ماكو API key محفوظ لهذا المزوّد. افتح إعدادات الذكاء الاصطناعي وأضف المفتاح.");
         if(model==null||model.trim().isEmpty())throw new Exception("حدد اسم النموذج من الإعدادات أولًا.");
         if(!AiSecureStore.allowRequest(context,provider.id))throw new Exception("منظّم الاستخدام منع الطلب: بلغت الحد اليومي أو الفاصل الأدنى المحلي. راجع AI Settings أو انتظر قليلًا.");
+        maxTokens = Math.max(128, Math.min(8192, AiSecureStore.settings(context).getInt("output_budget_tokens", 2048)));
         return sendRaw(context,provider,model,endpoint,apiKey,conversation,screenshotPath,maxTokens);
     }
     private static String sendRaw(android.content.Context context,AiProvider provider,String model,String endpoint,String apiKey,JSONArray history,String screenshotPath,int maxTokens) throws Exception {
@@ -63,7 +64,11 @@ public final class AiApiClient {
         return body.put("messages",messages);
     }
     private static JSONObject anthropicBody(android.content.Context context,String model,JSONArray history,String image,int maxTokens)throws Exception{
-        JSONObject body=new JSONObject().put("model",model).put("max_tokens",Math.max(128,Math.min(8192,maxTokens))).put("system",systemPrompt(context));JSONArray messages=new JSONArray();
+        int thinkingBudget = Math.max(0, Math.min(8192, AiSecureStore.settings(context).getInt("thinking_budget_tokens", 0)));
+        int safeMaxTokens = Math.max(128, Math.min(8192, Math.max(maxTokens, thinkingBudget + 512)));
+        JSONObject body=new JSONObject().put("model",model).put("max_tokens",safeMaxTokens).put("system",systemPrompt(context));
+        if (thinkingBudget > 0) body.put("thinking", new JSONObject().put("type","enabled").put("budget_tokens", Math.min(thinkingBudget, safeMaxTokens - 1)));
+        JSONArray messages=new JSONArray();
         for(int i=0;i<history.length();i++){JSONObject m=history.optJSONObject(i);if(m==null)continue;String role=m.optString("role","user"),text=m.optString("text","");JSONObject out=new JSONObject().put("role","assistant".equals(role)?"assistant":"user");if(!image.isEmpty()&&i==history.length()-1&&"user".equals(role)){JSONArray c=new JSONArray();c.put(new JSONObject().put("type","text").put("text",text));c.put(new JSONObject().put("type","image").put("source",new JSONObject().put("type","base64").put("media_type","image/jpeg").put("data",image)));out.put("content",c);}else out.put("content",text);messages.put(out);}return body.put("messages",messages);
     }
     private static JSONObject cohereBody(android.content.Context context,String model,JSONArray history,String image,int maxTokens)throws Exception{
@@ -73,7 +78,10 @@ public final class AiApiClient {
     private static JSONObject geminiBody(android.content.Context context,String model,JSONArray history,String image,int maxTokens)throws Exception{
         JSONObject body=new JSONObject().put("systemInstruction",new JSONObject().put("parts",new JSONArray().put(new JSONObject().put("text",systemPrompt(context)))));JSONArray contents=new JSONArray();
         for(int i=0;i<history.length();i++){JSONObject m=history.optJSONObject(i);if(m==null)continue;String role="assistant".equals(m.optString("role"))?"model":"user";JSONArray parts=new JSONArray().put(new JSONObject().put("text",m.optString("text","")));if(!image.isEmpty()&&i==history.length()-1&&"user".equals(role))parts.put(new JSONObject().put("inline_data",new JSONObject().put("mime_type","image/jpeg").put("data",image)));contents.put(new JSONObject().put("role",role).put("parts",parts));}
-        body.put("contents",contents).put("generationConfig",new JSONObject().put("maxOutputTokens",Math.max(128,Math.min(8192,maxTokens))).put("temperature",0.35));return body;
+        JSONObject generation = new JSONObject().put("maxOutputTokens",Math.max(128,Math.min(8192,maxTokens))).put("temperature",0.35);
+        int thinkingBudget = Math.max(0, Math.min(8192, AiSecureStore.settings(context).getInt("thinking_budget_tokens", 0)));
+        if (thinkingBudget > 0) generation.put("thinkingConfig", new JSONObject().put("thinkingBudget", Math.min(thinkingBudget, Math.max(0, maxTokens - 128))));
+        body.put("contents",contents).put("generationConfig",generation);return body;
     }
     private static String systemPrompt(android.content.Context context) {
         String base = """

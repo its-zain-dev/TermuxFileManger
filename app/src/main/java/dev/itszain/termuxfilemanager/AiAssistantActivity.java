@@ -46,7 +46,7 @@ import java.util.regex.Pattern;
 public class AiAssistantActivity extends Activity {
     private UiTheme theme; private String lastThemeName="midnight"; private int BG,PANEL,PANEL2,TEXT,MUTED,ACCENT,DANGER,DIVIDER;
     private JSONArray chats,sessions; private String activeChatId="",attachedImage=""; private Spinner chatsSpinner,providerSpinner,terminalSpinner; private TextView modelLabel,rateLabel,attachmentLabel; private LinearLayout messagesBox; private ScrollView messagesScroll; private EditText input; private Button sendButton; private boolean receiverRegistered=false; private boolean busy=false; private boolean updatingSpinners=false;
-    private final ExecutorService worker=Executors.newFixedThreadPool(3); private final Handler handler=new Handler(Looper.getMainLooper()); private final Map<Integer,String> commandChats=new HashMap<>(); private final Map<Integer,Boolean> agentCommandRequests=new HashMap<>(); private final Map<Integer,PopupCommand> popupCommands=new HashMap<>(); private boolean autoScreenshotUsed=false;
+    private final ExecutorService worker=Executors.newFixedThreadPool(3); private final Handler handler=new Handler(Looper.getMainLooper()); private final Map<Integer,String> commandChats=new HashMap<>(); private final Map<Integer,Boolean> agentCommandRequests=new HashMap<>(); private final Map<Integer,PopupCommand> popupCommands=new HashMap<>(); private final Map<String,Integer> autoStepsByChat=new HashMap<>(); private boolean autoScreenshotUsed=false;
     private static final class PopupCommand { final TextView output; final String sessionId; PopupCommand(TextView output,String sessionId){this.output=output;this.sessionId=sessionId;} }
     private final BroadcastReceiver resultReceiver=new BroadcastReceiver(){
         @Override public void onReceive(Context c,Intent i){
@@ -179,28 +179,46 @@ public class AiAssistantActivity extends Activity {
 
     private void updateHeader(){JSONObject c=current();if(c==null)return;String provider=c.optString("provider",AiSecureStore.getActiveProvider(this));int pi=AiProvider.indexOf(provider);updatingSpinners=true;if(providerSpinner.getSelectedItemPosition()!=pi)providerSpinner.setSelection(pi);AiProvider p=AiProvider.byId(provider);modelLabel.setText("Model: "+AiSecureStore.getModel(this,p.id));rateLabel.setText("متبقي اليوم: "+AiSecureStore.remainingRequests(this,p.id)+" طلب · حدود محلية");int si=indexOfSession(c.optString("sessionId",""));if(terminalSpinner!=null&&terminalSpinner.getSelectedItemPosition()!=si)terminalSpinner.setSelection(Math.max(0,si));updatingSpinners=false;}
     private void renderMessages(){if(messagesBox==null)return;messagesBox.removeAllViews();JSONObject c=current();if(c==null)return;JSONArray m=c.optJSONArray("messages");if(m==null||m.length()==0){TextView welcome=text("المساعد جاهز. اضبط المزوّد والمفتاح من ⚙. اربط الدردشة بجلسة Terminal للحصول على سياق آخر مخرجاتها. كل أمر يقترحه الذكاء الاصطناعي يحتاج موافقتك قبل التنفيذ.",13,MUTED,false);welcome.setPadding(dp(12),dp(12),dp(12),dp(12));welcome.setBackground(round(PANEL,12,DIVIDER));messagesBox.addView(welcome,match());return;}for(int i=0;i<m.length();i++){JSONObject msg=m.optJSONObject(i);if(msg!=null)addMessageView(msg,c.optString("id"));}messagesScroll.post(()->messagesScroll.fullScroll(View.FOCUS_DOWN));}
-    private void addMessageView(JSONObject m,String chatId){
-        String role=m.optString("role","user"),txt=m.optString("text","");
-        boolean assistant="assistant".equals(role),terminal="terminal".equals(role);
-        LinearLayout bubble=new LinearLayout(this); bubble.setOrientation(LinearLayout.VERTICAL);
-        bubble.setPadding(dp(11),dp(9),dp(11),dp(9));
-        bubble.setBackground(round(assistant?PANEL2:(terminal?Color.rgb(27,34,42):PANEL),13,assistant?ACCENT:DIVIDER));
-        TextView label=text(assistant?AiProvider.byId(providerFor(chatId)).name:(terminal?"TERMUX":"أنت"),10,assistant?ACCENT:MUTED,true);
-        bubble.addView(label,match());
-        JSONObject action=assistant?extractAgentAction(txt):null;
-        if(action!=null){
-            String reason=action.optString("reason","الوكيل يحتاج تنفيذ أداة حتى يكمّل المهمة.");
-            String command=agentCommand(action);
-            TextView description=text(reason,13,TEXT,false); description.setPadding(0,dp(4),0,dp(5)); bubble.addView(description,match());
-            TextView code=text("$ "+command,12,TEXT,false); code.setTypeface(Typeface.MONOSPACE); code.setTextIsSelectable(true);
-            code.setPadding(dp(9),dp(9),dp(9),dp(9)); code.setBackground(round(BG,9,DIVIDER)); bubble.addView(code,match());
-            Button run=button("مراجعة وتشغيل الأداة",ACCENT,BG); run.setOnClickListener(v->confirmAgentAction(chatId,action)); bubble.addView(run,match());
-            Button copy=button("نسخ الأمر",PANEL,TEXT); copy.setOnClickListener(v->copyText("AI command",command)); bubble.addView(copy,match());
-        }else{
-            addMarkdownContent(bubble,txt,chatId);
+    private void addMessageView(JSONObject m, String chatId) {
+        String role = m.optString("role", "user"), txt = m.optString("text", "");
+        boolean assistant = "assistant".equals(role), terminal = "terminal".equals(role);
+        LinearLayout bubble = new LinearLayout(this);
+        bubble.setOrientation(LinearLayout.VERTICAL);
+        bubble.setPadding(dp(11), dp(9), dp(11), dp(9));
+        bubble.setBackground(round(assistant ? PANEL2 : (terminal ? Color.rgb(27,34,42) : PANEL), 13, assistant ? ACCENT : DIVIDER));
+        TextView label = text(assistant ? AiProvider.byId(providerFor(chatId)).name : (terminal ? "TERMUX" : "أنت"), 10, assistant ? ACCENT : MUTED, true);
+        bubble.addView(label, match());
+        JSONObject action = assistant ? extractAgentAction(txt) : null;
+        if (action != null) {
+            String tool = action.optString("tool", action.optString("name", "run_shell"));
+            String reason = action.optString("reason", "الوكيل يحتاج أداة حتى يكمل المهمة.");
+            boolean skillInstall = "install_skill".equals(tool);
+            String display = skillInstall ? action.optString("url", action.optString("source", "")) : agentCommand(action);
+            TextView description = text(reason, 13, TEXT, false);
+            description.setPadding(0, dp(4), 0, dp(5));
+            bubble.addView(description, match());
+            TextView code = text(skillInstall ? ("Skill URL: " + display) : ("$ " + display), 12, TEXT, false);
+            code.setTypeface(Typeface.MONOSPACE);
+            code.setTextIsSelectable(true);
+            code.setPadding(dp(9), dp(9), dp(9), dp(9));
+            code.setBackground(round(BG, 9, DIVIDER));
+            bubble.addView(code, match());
+            Button run = button(skillInstall ? "تنصيب المهارة" : "مراجعة وتشغيل الأداة", ACCENT, BG);
+            run.setOnClickListener(v -> confirmAgentAction(chatId, action));
+            bubble.addView(run, match());
+            if (!skillInstall) {
+                Button copy = button("نسخ الأمر", PANEL, TEXT);
+                copy.setOnClickListener(v -> copyText("AI command", display));
+                bubble.addView(copy, match());
+            }
+        } else {
+            addMarkdownContent(bubble, txt, chatId);
         }
-        LinearLayout.LayoutParams p=match(); p.topMargin=dp(5); p.width=ViewGroup.LayoutParams.MATCH_PARENT;
-        p.gravity=assistant?Gravity.START:Gravity.END; messagesBox.addView(bubble,p);
+        LinearLayout.LayoutParams p = match();
+        p.topMargin = dp(5);
+        p.width = ViewGroup.LayoutParams.MATCH_PARENT;
+        p.gravity = assistant ? Gravity.START : Gravity.END;
+        messagesBox.addView(bubble, p);
     }
 
     private void addMarkdownContent(LinearLayout target,String source,String chatId){
@@ -284,37 +302,153 @@ public class AiAssistantActivity extends Activity {
         return command;
     }
 
-    private void confirmAgentAction(String chatId,JSONObject action){
-        JSONObject chat=findChat(chatId); if(chat==null)return;
-        String tool=action.optString("tool",action.optString("name","run_shell"));
-        if(!"run_shell".equals(tool)&&!"shell".equals(tool)&&!"run_command".equals(tool)){
-            alert("الأداة المطلوبة غير مدعومة بعد: "+tool+". استخدم run_shell لتنفيذ أوامر Termux."); return;
+    private void confirmAgentAction(String chatId, JSONObject action) {
+        if (autoExecutionEnabled(chatId)) {
+            executeAgentAction(chatId, action, true);
+            return;
         }
-        String command=agentCommand(action); if(command.trim().isEmpty()){alert("الوكيل رجّع أداة بدون أمر قابل للتنفيذ.");return;}
-        String sid=chat.optString("sessionId",""); JSONObject session=AiSecureStore.findById(sessions,sid);
-        JSONObject args=action.optJSONObject("arguments");
-        String fallback=session==null?"~/":session.optString("workdir","~/");
-        String workdir=action.optString("workdir",args==null?fallback:args.optString("workdir",fallback));
-        String reason=action.optString("reason","تنفيذ أداة يحتاجها الوكيل حتى يكمل المهمة.");
-        String risk=action.optString("risk","راجع الأمر قبل التشغيل");
-        new AlertDialog.Builder(this).setTitle("موافقة على أداة الوكيل")
-                .setMessage(reason+"\n\nمستوى المخاطرة: "+risk+"\nمجلد التشغيل: "+workdir+"\n\n"+command+"\n\nسيُنفّذ الأمر داخل Termux بصلاحيات المستخدم الحالية.")
-                .setPositiveButton("موافقة وتشغيل",(d,w)->{
-                    try{
-                        int request=TermuxCommandRunner.run(this,command,workdir,"TFM AI Agent tool",true);
-                        commandChats.put(request,chatId); agentCommandRequests.put(request,Boolean.TRUE);
-                        Toast.makeText(this,"اشتغلت الأداة. الوكيل راح يقرأ المخرجات ويقرر الخطوة التالية.",Toast.LENGTH_LONG).show();
-                    }catch(Exception e){alert(e.getMessage());}
-                }).setNeutralButton("نسخ الأمر",(d,w)->copyText("AI command",command))
-                .setNegativeButton("إلغاء",null).show();
+        String tool = action.optString("tool", action.optString("name", "run_shell"));
+        boolean installSkill = "install_skill".equals(tool);
+        String command = installSkill ? action.optString("url", action.optString("source", "")) : agentCommand(action);
+        String reason = action.optString("reason", "الوكيل يحتاج تنفيذ أداة حتى يكمل المهمة.");
+        String risk = action.optString("risk", "راجع الإجراء قبل التنفيذ");
+        JSONObject chat = findChat(chatId);
+        if (chat == null) return;
+        JSONObject session = AiSecureStore.findById(sessions, chat.optString("sessionId", ""));
+        String fallback = session == null ? "~/" : session.optString("workdir", "~/");
+        JSONObject args = action.optJSONObject("arguments");
+        String workdir = action.optString("workdir", args == null ? fallback : args.optString("workdir", fallback));
+        String message = reason + "\n\n" + (installSkill ? "رابط المهارة: " : "مستوى المخاطرة: " + risk + "\nمجلد التشغيل: " + workdir + "\n\n")
+                + command + (installSkill ? "\n\nسيتم تنزيل تعليمات SKILL.md وحفظها محليًا، ولن يُشغّل أي كود من المهارة أثناء التثبيت." : "\n\nسيُنفذ الأمر داخل Termux بصلاحيات المستخدم الحالية.");
+        new AlertDialog.Builder(this).setTitle(installSkill ? "تثبيت Agent Skill" : "موافقة على أداة الوكيل")
+                .setMessage(message)
+                .setPositiveButton(installSkill ? "تنصيب" : "موافقة وتشغيل", (d, w) -> executeAgentAction(chatId, action, false))
+                .setNeutralButton(installSkill ? "نسخ الرابط" : "نسخ الأمر", (d, w) -> copyText(installSkill ? "Skill URL" : "AI command", command))
+                .setNegativeButton("إلغاء", null).show();
     }
 
+    private boolean autoExecutionEnabled() {
+        return AiSecureStore.settings(this).getBoolean("agent_auto_execute", false);
+    }
+
+    private boolean autoExecutionEnabled(String chatId) {
+        JSONObject chat = findChat(chatId);
+        if (chat != null && chat.has("agent_auto_execute")) return chat.optBoolean("agent_auto_execute", false);
+        return autoExecutionEnabled();
+    }
+
+    private void toggleChatAutoExecution() {
+        JSONObject chat = current();
+        if (chat == null) return;
+        boolean enabled = !autoExecutionEnabled(chat.optString("id", ""));
+        new AlertDialog.Builder(this).setTitle("التنفيذ التلقائي لهذه الدردشة")
+                .setMessage(enabled
+                        ? "سيتم تشغيل أدوات Shell وتثبيت المهارات تلقائيًا في هذه الدردشة، من دون تأكيد لكل أمر. الأوامر الشديدة التدمير تبقى محجوبة."
+                        : "ستعود هذه الدردشة إلى طلب موافقتك قبل تشغيل كل أداة.")
+                .setPositiveButton(enabled ? "تفعيل" : "تعطيل", (d, w) -> {
+                    try { chat.put("agent_auto_execute", enabled); saveChats(); }
+                    catch (Exception ignored) {}
+                    Toast.makeText(this, enabled ? "التنفيذ التلقائي مفعّل لهذه الدردشة" : "التنفيذ التلقائي متوقف لهذه الدردشة", Toast.LENGTH_LONG).show();
+                    renderMessages();
+                }).setNegativeButton("إلغاء", null).show();
+    }
+
+    private void executeAgentAction(String chatId, JSONObject action, boolean automatic) {
+        JSONObject chat = findChat(chatId);
+        if (chat == null || action == null) return;
+        if (automatic) {
+            int current = autoStepsByChat.containsKey(chatId) ? autoStepsByChat.get(chatId) : 0;
+            int max = Math.max(1, Math.min(100, AiSecureStore.settings(this).getInt("agent_auto_max_steps", 16)));
+            if (current >= max) {
+                appendChatMessage(chat, "assistant", "توقف التنفيذ التلقائي بعد " + max + " خطوة لهذه المهمة حتى لا يدخل الوكيل في حلقة لا نهائية. راجع آخر مخرجاته ثم ابدأ مهمة جديدة أو زد الحد من الإعدادات.");
+                saveChats(); if (chatId.equals(activeChatId)) renderMessages();
+                return;
+            }
+            autoStepsByChat.put(chatId, current + 1);
+        }
+        String tool = action.optString("tool", action.optString("name", "run_shell"));
+        if ("install_skill".equals(tool)) {
+            String url = action.optString("url", action.optString("source", ""));
+            JSONObject args = action.optJSONObject("arguments");
+            if (url.isEmpty() && args != null) url = args.optString("url", args.optString("source", ""));
+            String name = action.optString("name", "");
+            if (name.isEmpty() && args != null) name = args.optString("name", "");
+            if (url.isEmpty() || !url.startsWith("https://")) {
+                appendChatMessage(chat, "assistant", "ما قدرت أنصّب المهارة: أحتاج رابط HTTPS واضحًا لـ SKILL.md أو مجلد مهارة على GitHub.");
+                saveChats(); if (chatId.equals(activeChatId)) renderMessages();
+                return;
+            }
+            final String skillUrl = url, skillName = name;
+            worker.execute(() -> {
+                String outcome;
+                try {
+                    AgentSkillManager.InstallResult installed = AgentSkillManager.installFromUrl(this, skillUrl, skillName);
+                    outcome = "نجح تثبيت المهارة /" + installed.name + " — " + installed.description + ". يمكن استدعاؤها بكتابة /" + installed.name + " ثم المهمة.";
+                } catch (Exception e) { outcome = "فشل تثبيت المهارة من " + skillUrl + ": " + e.getMessage(); }
+                final String result = outcome;
+                runOnUiThread(() -> {
+                    JSONObject live = findChat(chatId);
+                    if (live == null) return;
+                    appendChatMessage(live, "user", "[نتيجة أداة install_skill]\n" + result);
+                    saveChats();
+                    if (chatId.equals(activeChatId)) renderMessages();
+                    if (!busy) autoAnalyzeCommandResult(chatId);
+                    else Toast.makeText(this, "وصلت نتيجة تثبيت المهارة؛ أكمل التحليل بعد انتهاء الطلب الحالي.", Toast.LENGTH_LONG).show();
+                });
+            });
+            return;
+        }
+        if (!"run_shell".equals(tool) && !"shell".equals(tool) && !"run_command".equals(tool)) {
+            appendChatMessage(chat, "assistant", "الأداة غير مدعومة: " + tool + ". استخدم run_shell أو install_skill.");
+            saveChats(); if (chatId.equals(activeChatId)) renderMessages();
+            return;
+        }
+        String command = agentCommand(action);
+        if (command.trim().isEmpty()) {
+            appendChatMessage(chat, "assistant", "الوكيل رجّع أداة بدون أمر قابل للتنفيذ.");
+            saveChats(); if (chatId.equals(activeChatId)) renderMessages();
+            return;
+        }
+        if (automatic && unsafeForUnattendedExecution(command)) {
+            appendChatMessage(chat, "assistant", "حاجز الأمان أوقف هذا الأمر في وضع التنفيذ التلقائي لأنه قد يمسح النظام أو يهيّئ قرصًا أو يوقف الجهاز. لم يُنفّذ شيء. راجع الأمر يدويًا من وضع الموافقة: " + command);
+            saveChats(); if (chatId.equals(activeChatId)) renderMessages();
+            return;
+        }
+        JSONObject args = action.optJSONObject("arguments");
+        String sid = chat.optString("sessionId", "");
+        JSONObject session = AiSecureStore.findById(sessions, sid);
+        String fallback = session == null ? "~/" : session.optString("workdir", "~/");
+        String workdir = action.optString("workdir", args == null ? fallback : args.optString("workdir", fallback));
+        try {
+            int request = TermuxCommandRunner.run(this, command, workdir, "TFM AI Agent tool", true);
+            commandChats.put(request, chatId);
+            agentCommandRequests.put(request, Boolean.TRUE);
+            Toast.makeText(this, automatic ? "ينفّذ الوكيل الأداة تلقائيًا ثم سيقرأ النتيجة." : "اشتغلت الأداة؛ الوكيل سيقرأ المخرجات ويقترح الخطوة التالية.", Toast.LENGTH_LONG).show();
+        } catch (Exception e) {
+            appendChatMessage(chat, "assistant", "تعذر تشغيل أداة Termux: " + e.getMessage());
+            saveChats(); if (chatId.equals(activeChatId)) renderMessages();
+        }
+    }
+
+    private boolean unsafeForUnattendedExecution(String command) {
+        String lower = command == null ? "" : command.toLowerCase(java.util.Locale.ROOT).replace("\"", "").replace("'", "");
+        return lower.matches("(?s).*\\brm\\s+.*(?:--recursive|-[a-z]*r[a-z]*)\\s+(?:/\\S*|~(?:/\\S*)?|\\$home(?:/\\S*)?|\\$prefix(?:/\\S*)?)(?:\\s|$|[;&|]).*")
+                || lower.matches("(?s).*\\brm\\s+.*(?:--recursive|-[a-z]*r[a-z]*)\\s+(?:\\.|\\.\\.|\\*|\\./|\\./\\*)(?:\\s|$|[;&|]).*")
+                || lower.contains("rm --recursive --force /")
+                || lower.contains("rm --force --recursive /")
+                || lower.matches("(?s).*\\bmkfs(?:\\.[a-z0-9]+)?\\b.*")
+                || lower.matches("(?s).*\\bdd\\s+.*\\bof=/dev/.*")
+                || lower.matches("(?s).*\\b(shutdown|reboot|poweroff)\\b.*")
+                || lower.contains(":(){:|:&};:");
+    }
+
+
     private String providerFor(String chatId){JSONObject c=findChat(chatId);return c==null?"gemini":c.optString("provider","gemini");}
-    private void sendCurrent(){String text=input.getText().toString().trim();if(text.isEmpty())return;if(busy){Toast.makeText(this,"انتظر الرد الحالي أو افتح دردشة أخرى",Toast.LENGTH_SHORT).show();return;}JSONObject c=current();if(c==null)return;String image=attachedImage;attachedImage="";autoScreenshotUsed=false;attachmentLabel.setText("ماكو صورة مرفقة");input.setText("");appendChatMessage(c,"user",text);String sid=c.optString("sessionId","");String enriched=withTerminalContext(text,sid);JSONArray requestHistory=apiHistory(c);if(requestHistory.length()>0){try{requestHistory.put(requestHistory.length()-1,new JSONObject().put("role","user").put("text",enriched));}catch(Exception ignored){}}saveChats();renderMessages();busy=true;sendButton.setEnabled(false);rateLabel.setText("جاري الاتصال بالمزوّد…");final String chatId=c.optString("id"),providerId=c.optString("provider",AiSecureStore.getActiveProvider(this));final String model=AiSecureStore.getModel(this,providerId),endpoint=AiSecureStore.getEndpoint(this,providerId),imagePath=image;
-        worker.execute(()->{String response;try{String key=AiSecureStore.getKey(this,providerId);response=AiApiClient.send(this,AiProvider.byId(providerId),model,endpoint,key,requestHistory,imagePath,2048);}catch(Exception e){response="[تعذر إكمال الطلب]\n"+e.getMessage();}final String result=response;runOnUiThread(()->{JSONObject live=findChat(chatId);String visible=result.replace("[TFM_SCREENSHOT]","").replace("[REQUEST_SCREENSHOT]","").trim();if(live!=null){appendChatMessage(live,"assistant",visible);saveChats();}boolean requested=(result.contains("[TFM_SCREENSHOT]")||result.contains("[REQUEST_SCREENSHOT]"));if(requested&&!autoScreenshotUsed){autoScreenshotUsed=true;beginAgentScreenshotCapture(chatId,providerId,model,endpoint);return;}else{busy=false;sendButton.setEnabled(true);}updateHeader();renderMessages();});});
+    private void sendCurrent(){String text=input.getText().toString().trim();if(text.isEmpty())return;if(busy){Toast.makeText(this,"انتظر الرد الحالي أو افتح دردشة أخرى",Toast.LENGTH_SHORT).show();return;}String expanded=AgentSkillManager.expandSlashCommand(this,text);if(expanded==null){Toast.makeText(this,"المهارة غير مثبتة. افتح إعدادات AI ثم Agent Skills وثبّت رابط SKILL.md أولًا.",Toast.LENGTH_LONG).show();return;}JSONObject c=current();if(c==null)return;String image=attachedImage;attachedImage="";autoScreenshotUsed=false;attachmentLabel.setText("ماكو صورة مرفقة");input.setText("");appendChatMessage(c,"user",text);autoStepsByChat.put(c.optString("id"),0);if(!expanded.equals(text)){try{JSONArray saved=c.optJSONArray("messages");JSONObject last=saved==null?null:saved.optJSONObject(saved.length()-1);if(last!=null)last.put("expanded_prompt",expanded);}catch(Exception ignored){}}String sid=c.optString("sessionId","");String enriched=withTerminalContext(expanded,sid);JSONArray requestHistory=apiHistory(c);if(requestHistory.length()>0){try{requestHistory.put(requestHistory.length()-1,new JSONObject().put("role","user").put("text",enriched));}catch(Exception ignored){}}saveChats();renderMessages();busy=true;sendButton.setEnabled(false);rateLabel.setText("جاري الاتصال بالمزوّد…");final String chatId=c.optString("id"),providerId=c.optString("provider",AiSecureStore.getActiveProvider(this));final String model=AiSecureStore.getModel(this,providerId),endpoint=AiSecureStore.getEndpoint(this,providerId),imagePath=image;
+        worker.execute(()->{String response;try{String key=AiSecureStore.getKey(this,providerId);response=AiApiClient.send(this,AiProvider.byId(providerId),model,endpoint,key,requestHistory,imagePath,2048);}catch(Exception e){response="[تعذر إكمال الطلب]\n"+e.getMessage();}final String result=response;runOnUiThread(()->{JSONObject live=findChat(chatId);String visible=result.replace("[TFM_SCREENSHOT]","").replace("[REQUEST_SCREENSHOT]","").trim();if(live!=null){appendChatMessage(live,"assistant",visible);saveChats();}boolean requested=(result.contains("[TFM_SCREENSHOT]")||result.contains("[REQUEST_SCREENSHOT]"));if(requested&&!autoScreenshotUsed){autoScreenshotUsed=true;beginAgentScreenshotCapture(chatId,providerId,model,endpoint);return;}else{busy=false;sendButton.setEnabled(true);}updateHeader();renderMessages();JSONObject next=extractAgentAction(visible);if(next!=null&&autoExecutionEnabled(chatId))executeAgentAction(chatId,next,true);});});
     }
     private void appendChatMessage(JSONObject c,String role,String text){try{JSONArray a=c.optJSONArray("messages");if(a==null)a=new JSONArray();a.put(msg(role,text));while(a.length()>80){JSONArray n=new JSONArray();for(int i=1;i<a.length();i++)n.put(a.opt(i));a=n;}c.put("messages",a);}catch(Exception ignored){}}
-    private JSONArray apiHistory(JSONObject c){JSONArray src=c.optJSONArray("messages"),out=new JSONArray();if(src==null)return out;int start=Math.max(0,src.length()-32);for(int i=start;i<src.length();i++){JSONObject m=src.optJSONObject(i);if(m==null)continue;String role=m.optString("role","user");if("terminal".equals(role))role="user";if(!"assistant".equals(role)&&!"user".equals(role))continue;out.put(msg(role,m.optString("text","")));}return out;}
+    private JSONArray apiHistory(JSONObject c){JSONArray src=c.optJSONArray("messages"),out=new JSONArray();if(src==null)return out;int start=Math.max(0,src.length()-32);for(int i=start;i<src.length();i++){JSONObject m=src.optJSONObject(i);if(m==null)continue;String role=m.optString("role","user");if("terminal".equals(role))role="user";if(!"assistant".equals(role)&&!"user".equals(role))continue;String historyText=("user".equals(role)&&m.has("expanded_prompt"))?m.optString("expanded_prompt",m.optString("text","")):m.optString("text","");out.put(msg(role,historyText));}return out;}
     private String withTerminalContext(String userText,String sid){JSONObject s=AiSecureStore.findById(sessions,sid);if(s==null)return userText;String out=s.optString("output","");if(out.isEmpty())return userText;out=out.length()>10000?out.substring(out.length()-10000):out;return userText+"\n\n[Terminal session: "+s.optString("name","Terminal")+"; workdir="+s.optString("workdir","~/")+"]\n[Recent terminal output]\n"+out+"\n[حلّل المخرجات عند صلتها بالسؤال، ولا تفترض أن آخر أمر نجح ما لم تظهر النتيجة].";}
     private void broadcastPrompt(){String prompt=input.getText().toString().trim();if(prompt.isEmpty())return;if(busy){Toast.makeText(this,"انتظر حتى ينتهي الطلب الحالي",Toast.LENGTH_SHORT).show();return;}new AlertDialog.Builder(this).setTitle("إرسال الأمر إلى كل الدردشات").setMessage("سيُرسل نفس النص إلى كل دردشة محفوظة لها مفتاح API متاح. قد يستهلك ذلك طلبًا من كل مزوّد. عدد الدردشات: "+chats.length()+". متابعة؟\n\n"+prompt).setPositiveButton("إرسال للجميع",(d,w)->doBroadcast(prompt)).setNegativeButton("إلغاء",null).show();}
     private void doBroadcast(String prompt){input.setText("");JSONArray snapshot=AiSecureStore.cloneArray(chats);String active=activeChatId;busy=true;sendButton.setEnabled(false);rateLabel.setText("إرسال متتابع إلى الدردشات…");worker.execute(()->{List<String> summaries=new ArrayList<>();for(int i=0;i<snapshot.length();i++){JSONObject c=snapshot.optJSONObject(i);if(c==null)continue;String pid=c.optString("provider",AiSecureStore.getActiveProvider(this)),chatId=c.optString("id");try{String key=AiSecureStore.getKey(this,pid);if(key.isEmpty()){summaries.add(c.optString("name")+": تخطّيت لعدم وجود مفتاح");continue;}appendChatMessage(c,"user",prompt);String model=AiSecureStore.getModel(this,pid),endpoint=AiSecureStore.getEndpoint(this,pid);JSONArray history=apiHistory(c);String sid=c.optString("sessionId","");if(history.length()>0)history.put(history.length()-1,new JSONObject().put("role","user").put("text",withTerminalContext(prompt,sid)));String answer=AiApiClient.send(this,AiProvider.byId(pid),model,endpoint,key,history,"",2048);appendChatMessage(c,"assistant",answer);summaries.add(c.optString("name")+": وصل رد");int gap=AiSecureStore.settings(this).getInt("rate_gap_seconds",3);if(gap>0)Thread.sleep(gap*1000L);}catch(Exception e){appendChatMessage(c,"assistant","[خطأ أثناء البث]\n"+e.getMessage());summaries.add(c.optString("name")+": "+e.getMessage());}saveChats();}runOnUiThread(()->{busy=false;sendButton.setEnabled(true);rebuildChatSpinner();activeChatId=active;chatsSpinner.setSelection(indexOfChat(activeChatId));updateHeader();renderMessages();new AlertDialog.Builder(this).setTitle("نتيجة الإرسال الجماعي").setMessage(android.text.TextUtils.join("\n",summaries)).setPositiveButton("حسنًا",null).show();});});}
@@ -349,26 +483,44 @@ public class AiAssistantActivity extends Activity {
     }
     private boolean openTermux(){try{Intent launch=getPackageManager().getLaunchIntentForPackage("com.termux");if(launch==null){alert("Termux غير مثبت.");return false;}launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);startActivity(launch);return true;}catch(Exception e){alert("تعذر فتح Termux: "+e.getMessage());return false;}}
 
-    private void autoAnalyzeCommandResult(String chatId){
-        JSONObject chat=findChat(chatId);if(chat==null)return;
-        String providerId=chat.optString("provider",AiSecureStore.getActiveProvider(this));
-        String model=AiSecureStore.getModel(this,providerId),endpoint=AiSecureStore.getEndpoint(this,providerId);
-        JSONArray history=apiHistory(chat);
-        if(history.length()==0)return;
-        try{JSONObject last=history.optJSONObject(history.length()-1);if(last!=null){String txt=last.optString("text","");if(txt.length()>12000)last.put("text",txt.substring(txt.length()-12000));}}catch(Exception ignored){}
-        busy=true;if(sendButton!=null)sendButton.setEnabled(false);rateLabel.setText("تحليل مخرجات Termux تلقائيًا…");
-        worker.execute(()->{
+    private void autoAnalyzeCommandResult(String chatId) {
+        JSONObject chat = findChat(chatId);
+        if (chat == null) return;
+        String providerId = chat.optString("provider", AiSecureStore.getActiveProvider(this));
+        String model = AiSecureStore.getModel(this, providerId), endpoint = AiSecureStore.getEndpoint(this, providerId);
+        JSONArray history = apiHistory(chat);
+        if (history.length() == 0) return;
+        try {
+            JSONObject last = history.optJSONObject(history.length() - 1);
+            if (last != null) { String value = last.optString("text", ""); if (value.length() > 12000) last.put("text", value.substring(value.length() - 12000)); }
+        } catch (Exception ignored) {}
+        busy = true;
+        if (sendButton != null) sendButton.setEnabled(false);
+        rateLabel.setText("الوكيل يحلل المخرجات ويقرر الخطوة التالية…");
+        worker.execute(() -> {
             String answer;
-            try{
-                long lastCall=AiSecureStore.settings(this).getLong("rate_last_"+providerId,0);int gap=Math.max(0,AiSecureStore.settings(this).getInt("rate_gap_seconds",3));long wait=gap*1000L-(System.currentTimeMillis()-lastCall);
-                if(wait>30000L)throw new Exception("الفاصل المحلي المتبقي أطول من 30 ثانية؛ أرسل متابعة يدويًا لاحقًا حتى لا تتجاوز الحد الذي حددته.");
-                if(wait>0)Thread.sleep(wait);
-                answer=AiApiClient.send(this,AiProvider.byId(providerId),model,endpoint,AiSecureStore.getKey(this,providerId),history,"",2048);
-            }catch(Exception e){answer="[لم يكتمل التحليل التلقائي]\n"+e.getMessage()+"\nيمكنك إرسال سؤال يدويًا لمتابعة إصلاح المشكلة.";}
-            final String result=answer;
-            runOnUiThread(()->{JSONObject live=findChat(chatId);if(live!=null){appendChatMessage(live,"assistant",result);saveChats();}busy=false;if(sendButton!=null)sendButton.setEnabled(true);updateHeader();if(chatId.equals(activeChatId))renderMessages();});
+            try {
+                long lastCall = AiSecureStore.settings(this).getLong("rate_last_" + providerId, 0);
+                int gap = Math.max(0, AiSecureStore.settings(this).getInt("rate_gap_seconds", 3));
+                long wait = gap * 1000L - (System.currentTimeMillis() - lastCall);
+                if (wait > 30000L) throw new Exception("الفاصل المحلي المتبقي أطول من 30 ثانية؛ أرسل متابعة لاحقًا.");
+                if (wait > 0) Thread.sleep(wait);
+                answer = AiApiClient.send(this, AiProvider.byId(providerId), model, endpoint, AiSecureStore.getKey(this, providerId), history, "", 2048);
+            } catch (Exception e) { answer = "[لم يكتمل تحليل مخرجات Termux]\n" + e.getMessage(); }
+            final String result = answer;
+            runOnUiThread(() -> {
+                JSONObject live = findChat(chatId);
+                if (live != null) { appendChatMessage(live, "assistant", result); saveChats(); }
+                busy = false;
+                if (sendButton != null) sendButton.setEnabled(true);
+                updateHeader();
+                if (chatId.equals(activeChatId)) renderMessages();
+                JSONObject next = extractAgentAction(result);
+                if (next != null && autoExecutionEnabled(chatId)) executeAgentAction(chatId, next, true);
+            });
         });
     }
+
     private void maybeSubmitPendingScreenshot(){
         if(!AiSecureStore.hasPendingScreenshot(this))return;
         long since=AiSecureStore.pendingScreenshotSince(this),stamp=AiSecureStore.lastScreenshotAt(this),now=System.currentTimeMillis();
@@ -410,7 +562,7 @@ public class AiAssistantActivity extends Activity {
         dialog.setContentView(box);android.view.Window w=dialog.getWindow();if(w!=null){w.setBackgroundDrawableResource(android.R.color.transparent);w.setLayout((int)(getResources().getDisplayMetrics().widthPixels*0.94), (int)(getResources().getDisplayMetrics().heightPixels*0.80));}dialog.show();if(dialog.getWindow()!=null)dialog.getWindow().setLayout((int)(getResources().getDisplayMetrics().widthPixels*0.94),(int)(getResources().getDisplayMetrics().heightPixels*0.80));
     }
     private void appendSessionOutput(String sid,String output){JSONArray arr=AiSecureStore.loadArray(this,AiSecureStore.SESSIONS,"items");JSONObject session=AiSecureStore.findById(arr,sid);if(session==null)return;String old=session.optString("output","");if(old.length()>20000)old=old.substring(old.length()-15000);try{session.put("output",old+output);AiSecureStore.saveArray(this,AiSecureStore.SESSIONS,"items",arr);}catch(Exception ignored){}}
-    private void chatMenu(){String[] actions={"إعادة تسمية الدردشة","حذف الدردشة","إعدادات الذكاء الاصطناعي","إدارة جلسات Terminal"};new AlertDialog.Builder(this).setTitle("الدردشة الحالية").setItems(actions,(d,w)->{if(w==0)renameChat();if(w==1)deleteChat();if(w==2)startActivity(new Intent(this,AiSettingsActivity.class));if(w==3)startActivity(new Intent(this,TerminalSessionsActivity.class));}).show();}
+    private void chatMenu(){String[] actions={"إعادة تسمية الدردشة","حذف الدردشة","إعدادات الذكاء الاصطناعي","إدارة جلسات Terminal","تبديل وضع التنفيذ التلقائي لهذه الدردشة"};new AlertDialog.Builder(this).setTitle("الدردشة الحالية").setItems(actions,(d,w)->{if(w==0)renameChat();if(w==1)deleteChat();if(w==2)startActivity(new Intent(this,AiSettingsActivity.class));if(w==3)startActivity(new Intent(this,TerminalSessionsActivity.class));if(w==4)toggleChatAutoExecution();}).show();}
     private void renameChat(){JSONObject c=current();if(c==null)return;EditText e=new EditText(this);e.setText(c.optString("name"));new AlertDialog.Builder(this).setTitle("اسم الدردشة").setView(e).setPositiveButton("حفظ",(d,w)->{try{c.put("name",e.getText().toString().trim().isEmpty()?"AI Chat":e.getText().toString().trim());saveChats();rebuildChatSpinner();chatsSpinner.setSelection(indexOfChat(activeChatId));}catch(Exception ignored){}}).setNegativeButton("إلغاء",null).show();}
     private void deleteChat(){if(chats.length()<=1){new AlertDialog.Builder(this).setMessage("احتفظ بدردشة واحدة على الأقل.").setPositiveButton("حسنًا",null).show();return;}new AlertDialog.Builder(this).setTitle("حذف الدردشة؟").setMessage("سيُحذف سجل هذه الدردشة المحلي فقط.").setPositiveButton("حذف",(d,w)->{JSONArray n=new JSONArray();for(int i=0;i<chats.length();i++){JSONObject c=chats.optJSONObject(i);if(c!=null&&!activeChatId.equals(c.optString("id")))n.put(c);}chats=n;activeChatId=chats.optJSONObject(0).optString("id");saveChats();rebuildChatSpinner();updateHeader();renderMessages();}).setNegativeButton("إلغاء",null).show();}
     private List<String> chatNames(){List<String> a=new ArrayList<>();for(int i=0;i<chats.length();i++){JSONObject c=chats.optJSONObject(i);a.add(c==null?"AI Chat":c.optString("name","AI Chat")+" · "+AiProvider.byId(c.optString("provider","gemini")).name);}return a;}

@@ -75,7 +75,22 @@ public final class AiApiClient {
         for(int i=0;i<history.length();i++){JSONObject m=history.optJSONObject(i);if(m==null)continue;String role="assistant".equals(m.optString("role"))?"model":"user";JSONArray parts=new JSONArray().put(new JSONObject().put("text",m.optString("text","")));if(!image.isEmpty()&&i==history.length()-1&&"user".equals(role))parts.put(new JSONObject().put("inline_data",new JSONObject().put("mime_type","image/jpeg").put("data",image)));contents.put(new JSONObject().put("role",role).put("parts",parts));}
         body.put("contents",contents).put("generationConfig",new JSONObject().put("maxOutputTokens",Math.max(128,Math.min(8192,maxTokens))).put("temperature",0.35));return body;
     }
-    private static String systemPrompt(){return "أنت مساعد وكيل برمجي عملي يعمل مع Termux على أندرويد. حلّل أخطاء الأوامر والمخرجات بدقة، وميّز بين الحقائق والافتراضات. عندما تقترح أوامر ضع كل مجموعة قابلة للتنفيذ داخل code fence مع لغة bash. لا تدّعي أنك نفذت أمرًا أو رأيت شاشة لم تُرفق. لا تطلب أسرارًا أو مفاتيح API ضمن الدردشة. قبل الحذف أو الترقية أو أي عملية مؤثرة، اشرح أثرها بوضوح. إذا احتجت رؤية لقطة حديثة من شاشة الهاتف أو مخرجات TUI، أضف الرمز [TFM_SCREENSHOT] مرة واحدة إلى ردك؛ التطبيق لن يلتقط شيئًا إلا إذا كان المستخدم قد فعّل مشاركة الشاشة من نافذة أندرويد مسبقًا. لا تطلب لقطات متكررة في نفس الدور. لا تنفذ الأدوات بنفسك؛ التطبيق يطلب موافقة المستخدم قبل تشغيل الأوامر.";}
+    private static String systemPrompt(){
+        return """
+        أنت وكيل برمجي مستقل يعمل داخل تطبيق Android متصل ببيئة Termux الحقيقية على جهاز المستخدم.
+        مهمتك: افهم الهدف، افحص الملفات أو البيئة، نفّذ العمل عبر الأدوات، اقرأ المخرجات، أصلح الأخطاء، شغّل الاختبارات، ثم لخّص النتيجة بصدق. لا تكتفِ بإعطاء أوامر يمكن للمستخدم نسخها بنفسه عندما تستطيع طلب تنفيذها كأداة.
+
+        الأداة المتاحة حاليًا هي run_shell، وهي تشغّل أمرًا فعليًا داخل Termux وتعيد stdout وstderr ورمز الخروج. تستطيع استعمالها للفحص، وقراءة الملفات، والبحث، وتشغيل Python أو Node أو compilers أو الاختبارات عبر أوامر Shell.
+        عندما تحتاج إلى تنفيذ أداة، أجب برسالة واحدة فقط عبارة عن JSON صالح بلا Markdown أو code fence، وبالشكل التالي:
+        {"tfm_action":{"tool":"run_shell","command":"pwd && ls -la","workdir":"~/","reason":"أفحص محتويات مجلد العمل قبل تعديل الملفات.","risk":"low"}}
+        الحقول المطلوبة: tool وcommand وreason. workdir اختياري ويُفضّل أن يكون مجلد العمل الحالي. اجعل كل إجراء أداة واحدًا في كل رد، ثم تابع من مخرجاته عندما يرسلها التطبيق لك.
+        التطبيق سيعرض الأمر للمستخدم ويطلب موافقته قبل تشغيله؛ لا تدّعِ أن الأداة نُفذت قبل وصول المخرجات. بعد وصول النتائج، اختر الخطوة التالية أو أنهِ المهمة إذا اكتملت.
+        ابدأ غالبًا بأوامر فحص مثل pwd وls وgit status وsed، ولا تحذف ملفات أو تستبدل ملفات كثيرة أو تثبّت حزمًا من دون توضيح الأثر. تجنّب أوامر الحذف التدميرية الواسعة مثل rm -rf على مسارات عامة، ولا تطلب أو تطبع مفاتيح API أو كلمات مرور.
+        إذا لم تكن هناك حاجة إلى أداة، أجب بلغة طبيعية واضحة واستخدم Markdown العادي. لا تضع JSON داخل رد عادي ولا تدّعِ إجراء تغييرات غير منفذة.
+        إذا احتجت لقطة حديثة من الشاشة، أضف الرمز [TFM_SCREENSHOT] مرة واحدة. التطبيق لن يلتقط الشاشة إلا بعد الموافقة على مسار التقاط الشاشة من أندرويد.
+        """.trim();
+    }
+
     private static String readImageBase64(String path)throws Exception{if(path==null||path.trim().isEmpty())return "";File f=new File(path);if(!f.isFile()||f.length()>5*1024*1024)return "";byte[] b;try(java.io.FileInputStream in=new java.io.FileInputStream(f);ByteArrayOutputStream out=new ByteArrayOutputStream()){byte[] buf=new byte[8192];int n;while((n=in.read(buf))>0)out.write(buf,0,n);b=out.toByteArray();}return Base64.encodeToString(b,Base64.NO_WRAP);}
     private static String readAll(InputStream in)throws Exception{if(in==null)return "";try(InputStream input=in;ByteArrayOutputStream out=new ByteArrayOutputStream()){byte[] b=new byte[8192];int n;while((n=input.read(b))>0){out.write(b,0,n);if(out.size()>3*1024*1024)break;}return out.toString("UTF-8");}}
     private static String extractError(String raw){try{JSONObject o=new JSONObject(raw);if(o.has("error")){Object e=o.opt("error");if(e instanceof JSONObject)return ((JSONObject)e).optString("message",e.toString());return String.valueOf(e);}return raw.length()>700?raw.substring(0,700):raw;}catch(Exception e){return raw.length()>700?raw.substring(0,700):raw;}}

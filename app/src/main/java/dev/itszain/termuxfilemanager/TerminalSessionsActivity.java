@@ -45,13 +45,63 @@ public class TerminalSessionsActivity extends Activity {
     private void initTheme(){lastThemeName=UiTheme.getName(this);theme=UiTheme.get(this);BG=theme.bg;PANEL=theme.panel;PANEL2=theme.panel2;TEXT=theme.text;MUTED=theme.muted;ACCENT=theme.accent;DANGER=theme.danger;DIVIDER=theme.divider;}
     private void ensureOneSession(){if(sessions.length()==0){JSONObject o=new JSONObject();try{o.put("id",Long.toString(System.currentTimeMillis()));o.put("name","جلسة 1");o.put("workdir","~/");o.put("output","جاهز. نفّذ أمرًا من الحقل أدناه.\n");sessions.put(o);activeId=o.optString("id");save();}catch(Exception ignored){}}if(AiSecureStore.findById(sessions,activeId)==null)activeId=sessions.optJSONObject(0).optString("id");}
     private JSONObject current(){JSONObject o=AiSecureStore.findById(sessions,activeId);if(o==null&&sessions.length()>0)o=sessions.optJSONObject(0);return o;}
-    private void build(){root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setPadding(dp(12),dp(8),dp(12),dp(12));root.setBackgroundColor(BG);setContentView(root);
-        LinearLayout header=new LinearLayout(this);header.setGravity(Gravity.CENTER_VERTICAL);Button back=button("‹",PANEL2,TEXT);back.setTextSize(27);header.addView(back,new LinearLayout.LayoutParams(dp(46),dp(44)));back.setOnClickListener(v->finish());TextView title=text("Terminal Sessions",19,TEXT,true);LinearLayout.LayoutParams tl=new LinearLayout.LayoutParams(0,dp(44),1);tl.leftMargin=dp(8);header.addView(title,tl);Button add=button("+ جلسة",PANEL2,ACCENT);header.addView(add,new LinearLayout.LayoutParams(dp(82),dp(40)));add.setOnClickListener(v->newSession());root.addView(header);
-        TextView note=text("جلسات عمل محفوظة مع سجل المخرجات. أوامر Shell تعمل داخل Termux؛ تشغيل TUI تفاعلي يفتح تطبيق Termux لأن أندرويد لا يتيح تضمين طرفية Termux داخليًا مباشرة.",11,MUTED,false);note.setPadding(dp(3),dp(5),dp(3),dp(8));root.addView(note);
-        sessionSpinner=new Spinner(this);sessionSpinner.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,sessionNames()));root.addView(sessionSpinner,match());sessionSpinner.setSelection(Math.max(0,indexOfSession(activeId)));sessionSpinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onNothingSelected(android.widget.AdapterView<?> p){}public void onItemSelected(android.widget.AdapterView<?> p,View v,int pos,long id){if(pos>=0&&pos<sessions.length()){activeId=sessions.optJSONObject(pos).optString("id");AiSecureStore.settings(TerminalSessionsActivity.this).edit().putString("active_terminal_session",activeId).apply();loadSessionFields();}}});
-        LinearLayout fields=new LinearLayout(this);fields.setOrientation(LinearLayout.HORIZONTAL);nameInput=field("اسم الجلسة");workdirInput=field("~/");fields.addView(nameInput,new LinearLayout.LayoutParams(0,dp(44),1));LinearLayout.LayoutParams wl=new LinearLayout.LayoutParams(0,dp(44),1);wl.leftMargin=dp(5);fields.addView(workdirInput,wl);root.addView(fields,match());LinearLayout sessionActions=new LinearLayout(this);Button save=button("حفظ الاسم والمسار",PANEL,TEXT),remove=button("حذف الجلسة",PANEL,DANGER);sessionActions.addView(save,new LinearLayout.LayoutParams(0,dp(38),1));LinearLayout.LayoutParams rl=new LinearLayout.LayoutParams(0,dp(38),1);rl.leftMargin=dp(5);sessionActions.addView(remove,rl);save.setOnClickListener(v->saveSessionFields());remove.setOnClickListener(v->removeSession());root.addView(sessionActions,match());
-        outputView=text("",12,TEXT,false);outputView.setTypeface(Typeface.MONOSPACE);outputView.setTextIsSelectable(true);outputView.setGravity(Gravity.TOP|Gravity.START);outputView.setPadding(dp(10),dp(9),dp(10),dp(9));outputView.setBackground(round(PANEL,10,DIVIDER));ScrollView outputScroll=new ScrollView(this);outputScroll.addView(outputView);LinearLayout.LayoutParams opl=new LinearLayout.LayoutParams(-1,0,1);opl.topMargin=dp(3);root.addView(outputScroll,opl);
-        commandInput=field("أمر Shell أو سكربت متعدد الأسطر");commandInput.setTypeface(Typeface.MONOSPACE);commandInput.setGravity(Gravity.TOP|Gravity.START);commandInput.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_FLAG_MULTI_LINE|InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);commandInput.setMinLines(2);commandInput.setMaxLines(6);root.addView(commandInput,match());LinearLayout commands=new LinearLayout(this);Button run=button("تنفيذ",PANEL2,ACCENT),tui=button("تشغيل TUI في Termux",PANEL2,TEXT),broadcast=button("نفس الأمر لكل الجلسات",PANEL2,TEXT);commands.addView(run,new LinearLayout.LayoutParams(0,dp(42),1));LinearLayout.LayoutParams t=new LinearLayout.LayoutParams(0,dp(42),1);t.leftMargin=dp(4);commands.addView(tui,t);root.addView(commands,match());broadcast.setOnClickListener(v->broadcast());tui.setOnClickListener(v->runTui());run.setOnClickListener(v->runCurrent());LinearLayout extra=new LinearLayout(this);Button clear=button("مسح المخرجات",PANEL,TEXT),copy=button("نسخ المخرجات",PANEL,TEXT);extra.addView(clear,new LinearLayout.LayoutParams(0,dp(36),1));LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(0,dp(36),1);cp.leftMargin=dp(4);extra.addView(copy,cp);clear.setOnClickListener(v->{JSONObject o=current();try{o.put("output","");save();refreshOutput();}catch(Exception ignored){}});copy.setOnClickListener(v->{ClipboardManager cm=(ClipboardManager)getSystemService(CLIPBOARD_SERVICE);cm.setPrimaryClip(ClipData.newPlainText("Terminal output",outputView.getText()));Toast.makeText(this,"انسخت المخرجات",Toast.LENGTH_SHORT).show();});root.addView(extra,match());root.addView(broadcast,match());loadSessionFields();}
+    private void build(){
+        root=new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(dp(14),dp(8),dp(14),dp(10)); root.setBackgroundColor(BG); setContentView(root);
+        LinearLayout header=new LinearLayout(this); header.setGravity(Gravity.CENTER_VERTICAL);
+        Button back=button("‹",PANEL2,TEXT); back.setTextSize(26); header.addView(back,new LinearLayout.LayoutParams(dp(42),dp(42)));
+        back.setOnClickListener(v->finish());
+        LinearLayout titleBox=new LinearLayout(this); titleBox.setOrientation(LinearLayout.VERTICAL);
+        titleBox.addView(text("Terminal Workspace",18,TEXT,true));
+        titleBox.addView(text("جلسات ومخرجات وأوامر Termux",11,MUTED,false));
+        LinearLayout.LayoutParams titleLp=new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1); titleLp.leftMargin=dp(8); header.addView(titleBox,titleLp);
+        Button menu=button("⋮",PANEL,TEXT); menu.setTextSize(22); header.addView(menu,new LinearLayout.LayoutParams(dp(44),dp(42)));
+        menu.setOnClickListener(v->new AlertDialog.Builder(this).setTitle("إجراءات الجلسة")
+                .setItems(new String[]{"جلسة جديدة","تنفيذ الأمر بكل الجلسات","مسح المخرجات","نسخ المخرجات","حذف الجلسة"},(d,w)->{
+                    if(w==0)newSession();
+                    else if(w==1)broadcast();
+                    else if(w==2){JSONObject s=current();if(s!=null)try{s.put("output","");save();refreshOutput();}catch(Exception ignored){}}
+                    else if(w==3){ClipboardManager cm=(ClipboardManager)getSystemService(CLIPBOARD_SERVICE);cm.setPrimaryClip(ClipData.newPlainText("Terminal output",outputView.getText()));Toast.makeText(this,"تم نسخ المخرجات",Toast.LENGTH_SHORT).show();}
+                    else removeSession();
+                }).show());
+        root.addView(header);
+        TextView note=text("الأوامر غير التفاعلية تعرض النتيجة هنا. برامج TUI مثل nano وvim وhtop تفتح في تطبيق Termux نفسه.",11,MUTED,false);
+        note.setPadding(dp(3),dp(5),dp(3),dp(8)); root.addView(note);
+
+        TextView sessionLabel=text("الجلسة",11,MUTED,true); root.addView(sessionLabel);
+        sessionSpinner=new Spinner(this); sessionSpinner.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,sessionNames()));
+        root.addView(sessionSpinner,new LinearLayout.LayoutParams(-1,dp(40)));
+        sessionSpinner.setSelection(Math.max(0,indexOfSession(activeId)));
+        sessionSpinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){
+            public void onNothingSelected(android.widget.AdapterView<?> p){}
+            public void onItemSelected(android.widget.AdapterView<?> p,View v,int pos,long id){
+                if(pos>=0&&pos<sessions.length()){activeId=sessions.optJSONObject(pos).optString("id");AiSecureStore.settings(TerminalSessionsActivity.this).edit().putString("active_terminal_session",activeId).apply();loadSessionFields();}
+            }
+        });
+
+        TextView nameLabel=text("اسم الجلسة",11,MUTED,true); LinearLayout.LayoutParams labelLp=match(); labelLp.topMargin=dp(4); root.addView(nameLabel,labelLp);
+        nameInput=field("مثلاً: مشروع Python"); root.addView(nameInput,new LinearLayout.LayoutParams(-1,dp(42)));
+        TextView workLabel=text("مجلد العمل",11,MUTED,true); LinearLayout.LayoutParams workLabelLp=match(); workLabelLp.topMargin=dp(4); root.addView(workLabel,workLabelLp);
+        workdirInput=field("~/"); root.addView(workdirInput,new LinearLayout.LayoutParams(-1,dp(42)));
+        Button save=button("حفظ بيانات الجلسة",PANEL,TEXT); LinearLayout.LayoutParams saveLp=new LinearLayout.LayoutParams(-1,dp(38)); saveLp.bottomMargin=dp(6); root.addView(save,saveLp); save.setOnClickListener(v->saveSessionFields());
+
+        TextView outputLabel=text("المخرجات",11,MUTED,true); root.addView(outputLabel);
+        outputView=text("",12,TEXT,false); outputView.setTypeface(Typeface.MONOSPACE); outputView.setTextIsSelectable(true);
+        outputView.setGravity(Gravity.TOP|Gravity.START); outputView.setPadding(dp(11),dp(10),dp(11),dp(10)); outputView.setBackground(round(Color.rgb(13,17,23),11,DIVIDER));
+        ScrollView outputScroll=new ScrollView(this); outputScroll.setFillViewport(false); outputScroll.addView(outputView);
+        LinearLayout.LayoutParams outputLp=new LinearLayout.LayoutParams(-1,0,1); outputLp.topMargin=dp(4); outputLp.bottomMargin=dp(7); root.addView(outputScroll,outputLp);
+
+        commandInput=field("اكتب أمر Shell أو سكربت متعدد الأسطر");
+        commandInput.setTypeface(Typeface.MONOSPACE); commandInput.setGravity(Gravity.TOP|Gravity.START);
+        commandInput.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_FLAG_MULTI_LINE|InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        commandInput.setMinLines(2); commandInput.setMaxLines(5); root.addView(commandInput,new LinearLayout.LayoutParams(-1,dp(84)));
+        LinearLayout actions=new LinearLayout(this); actions.setGravity(Gravity.CENTER_VERTICAL);
+        Button run=button("▶ تنفيذ الأمر",ACCENT,BG); actions.addView(run,new LinearLayout.LayoutParams(0,dp(44),1));
+        Button tui=button("فتح TUI في Termux",PANEL2,TEXT); LinearLayout.LayoutParams tuiLp=new LinearLayout.LayoutParams(0,dp(44),1); tuiLp.leftMargin=dp(6); actions.addView(tui,tuiLp);
+        LinearLayout.LayoutParams actionsLp=new LinearLayout.LayoutParams(-1,ViewGroup.LayoutParams.WRAP_CONTENT); actionsLp.topMargin=dp(6); root.addView(actions,actionsLp);
+        run.setOnClickListener(v->runCurrent()); tui.setOnClickListener(v->runTui()); loadSessionFields();
+    }
+
     private void newSession(){EditText n=field("اسم الجلسة الجديدة");n.setText("جلسة "+(sessions.length()+1));new AlertDialog.Builder(this).setTitle("جلسة Terminal جديدة").setView(n).setPositiveButton("إنشاء",(d,w)->{String name=n.getText().toString().trim();if(name.isEmpty())name="جلسة "+(sessions.length()+1);JSONObject s=new JSONObject();try{s.put("id",Long.toString(System.nanoTime()));s.put("name",name);s.put("workdir",workdirInput==null?"~/":workdirInput.getText().toString());s.put("output","جلسة جديدة\n");sessions.put(s);activeId=s.optString("id");save();rebuildSpinner();loadSessionFields();}catch(Exception ignored){}}).setNegativeButton("إلغاء",null).show();}
     private void saveSessionFields(){JSONObject o=current();if(o==null)return;try{o.put("name",nameInput.getText().toString().trim().isEmpty()?"Terminal":nameInput.getText().toString().trim());o.put("workdir",workdirInput.getText().toString().trim().isEmpty()?"~/":workdirInput.getText().toString().trim());save();rebuildSpinner();sessionSpinner.setSelection(indexOfSession(activeId));Toast.makeText(this,"انحفظت الجلسة",Toast.LENGTH_SHORT).show();}catch(Exception ignored){}}
     private void removeSession(){if(sessions.length()<=1){Toast.makeText(this,"لازم تبقى جلسة واحدة على الأقل",Toast.LENGTH_SHORT).show();return;}new AlertDialog.Builder(this).setTitle("حذف الجلسة").setMessage("راح ينحذف تعريف الجلسة وسجلها المحلي؛ ما راح ينحذف أي ملف في Termux.").setPositiveButton("حذف",(d,w)->{JSONArray a=new JSONArray();for(int i=0;i<sessions.length();i++){JSONObject o=sessions.optJSONObject(i);if(o!=null&&!activeId.equals(o.optString("id")))a.put(o);}sessions=a;activeId=sessions.optJSONObject(0).optString("id");save();rebuildSpinner();loadSessionFields();}).setNegativeButton("إلغاء",null).show();}

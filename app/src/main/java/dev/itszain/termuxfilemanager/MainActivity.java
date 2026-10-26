@@ -404,33 +404,57 @@ except Exception as e:
         root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(BG);
-        root.setPadding(dp(14), dp(8), dp(14), dp(8));
+        root.setPadding(dp(16), dp(10), dp(16), dp(10));
         setContentView(root);
 
-        LinearLayout top = new LinearLayout(this);
-        top.setGravity(Gravity.CENTER_VERTICAL);
-        top.setOrientation(LinearLayout.HORIZONTAL);
-        TextView title = text("TFM  |  مدير ملفات Termux", 19, TEXT, true);
-        top.addView(title, new LinearLayout.LayoutParams(0, dp(48), 1));
-        Button aiHub = button("AI ★", PANEL, TEXT);
-        aiHub.setTextSize(11);
-        aiHub.setOnClickListener(v -> { startActivity(new Intent(this, AiAssistantActivity.class)); overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out); });
-        top.addView(aiHub, new LinearLayout.LayoutParams(dp(52), dp(40)));
-        Button toolsHub = button("الأدوات", PANEL_2, ACCENT);
-        toolsHub.setOnClickListener(v -> {
-            startActivity(new Intent(this, ToolsActivity.class));
+        LinearLayout header = new LinearLayout(this);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout heading = new LinearLayout(this);
+        heading.setOrientation(LinearLayout.VERTICAL);
+        heading.addView(text("TFM Workspace", 21, TEXT, true));
+        heading.addView(text("مساحة عمل Termux", 11, MUTED, false));
+        header.addView(heading, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        Button menu = button("⋮", PANEL, TEXT);
+        menu.setTextSize(22);
+        header.addView(menu, new LinearLayout.LayoutParams(dp(44), dp(44)));
+        menu.setOnClickListener(v -> new AlertDialog.Builder(this)
+                .setTitle("المزيد")
+                .setItems(new String[]{"جلسات Terminal", "مركز الأدوات", "إعدادات الذكاء الاصطناعي", "إعداد وربط Termux"},
+                        (dialog, which) -> {
+                            if (which == 0) startActivity(new Intent(this, TerminalSessionsActivity.class));
+                            else if (which == 1) startActivity(new Intent(this, ToolsActivity.class));
+                            else if (which == 2) startActivity(new Intent(this, AiSettingsActivity.class));
+                            else showHelpDialog(false);
+                        }).show());
+        root.addView(header);
+
+        LinearLayout agentCard = new LinearLayout(this);
+        agentCard.setOrientation(LinearLayout.HORIZONTAL);
+        agentCard.setGravity(Gravity.CENTER_VERTICAL);
+        agentCard.setPadding(dp(14), dp(12), dp(12), dp(12));
+        agentCard.setBackground(round(PANEL_2, 16, ACCENT));
+        LinearLayout agentInfo = new LinearLayout(this);
+        agentInfo.setOrientation(LinearLayout.VERTICAL);
+        agentInfo.addView(text("AI Agent", 17, TEXT, true));
+        TextView agentDescription = text("يفحص المخرجات وينفّذ أدوات داخل Termux بعد موافقتك", 11, MUTED, false);
+        LinearLayout.LayoutParams sub = new LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT);
+        sub.topMargin = dp(3);
+        agentInfo.addView(agentDescription, sub);
+        agentCard.addView(agentInfo, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        Button openAgent = button("فتح الوكيل  ›", ACCENT, BG);
+        openAgent.setOnClickListener(v -> {
+            startActivity(new Intent(this, AiAssistantActivity.class));
             overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out);
         });
-        LinearLayout.LayoutParams thlp = new LinearLayout.LayoutParams(dp(62), dp(40)); thlp.leftMargin=dp(4); top.addView(toolsHub, thlp);
-        Button help = button("الربط", PANEL_2, ACCENT);
-        help.setOnClickListener(v -> showHelpDialog(false));
-        LinearLayout.LayoutParams helpLp = new LinearLayout.LayoutParams(dp(50), dp(40));
-        helpLp.leftMargin = dp(4);
-        top.addView(help, helpLp);
-        root.addView(top);
+        agentCard.addView(openAgent, new LinearLayout.LayoutParams(dp(108), dp(42)));
+        LinearLayout.LayoutParams agentLp = new LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT);
+        agentLp.topMargin = dp(10);
+        agentLp.bottomMargin = dp(10);
+        root.addView(agentCard, agentLp);
 
-        connectionLabel = text("غير متصل بـ Termux", 12, MUTED, false);
-        connectionLabel.setPadding(dp(3), 0, 0, dp(6));
+        connectionLabel = text("جارِ فحص اتصال Termux…", 11, MUTED, false);
+        connectionLabel.setPadding(dp(2), 0, 0, dp(7));
         root.addView(connectionLabel);
 
         pathBar = new LinearLayout(this);
@@ -439,27 +463,27 @@ except Exception as e:
         pathInput.setSingleLine(true);
         pathInput.setTextColor(TEXT);
         pathInput.setHintTextColor(MUTED);
-        pathInput.setTextSize(12);
-        pathInput.setHint("المسار الكامل أو ~/...");
-        pathInput.setPadding(dp(11), 0, dp(11), 0);
-        pathInput.setBackground(round(PANEL, 12, Color.TRANSPARENT));
-        pathBar.addView(pathInput, new LinearLayout.LayoutParams(0, dp(45), 1));
+        pathInput.setTextSize(13);
+        pathInput.setHint("المسار الحالي أو ~/...");
+        pathInput.setPadding(dp(12), 0, dp(12), 0);
+        pathInput.setBackground(round(PANEL, 12, DIVIDER));
+        pathBar.addView(pathInput, new LinearLayout.LayoutParams(0, dp(46), 1));
         Button go = button("فتح", PANEL_2, ACCENT);
         go.setOnClickListener(v -> {
             String path = pathInput.getText().toString().trim();
             if (!path.isEmpty()) loadDirectory(path, false);
         });
         LinearLayout.LayoutParams goLp = new LinearLayout.LayoutParams(dp(58), dp(42));
-        goLp.setMargins(dp(6), 0, 0, 0);
+        goLp.leftMargin = dp(6);
         pathBar.addView(go, goLp);
-        Button up = button("↑", PANEL_2, TEXT);
+        Button up = button("↑", PANEL, TEXT);
         up.setTextSize(20);
         up.setOnClickListener(v -> {
             String parent = new java.io.File(currentPath).getParent();
             if (parent != null) loadDirectory(parent, false);
         });
-        LinearLayout.LayoutParams upLp = new LinearLayout.LayoutParams(dp(44), dp(42));
-        upLp.setMargins(dp(6), 0, 0, 0);
+        LinearLayout.LayoutParams upLp = new LinearLayout.LayoutParams(dp(42), dp(42));
+        upLp.leftMargin = dp(5);
         pathBar.addView(up, upLp);
         root.addView(pathBar);
 
@@ -468,40 +492,40 @@ except Exception as e:
         quick.setGravity(Gravity.CENTER_VERTICAL);
         quick.addView(buttonSmall("HOME", () -> loadDirectory(TERMUX_HOME, false)), weightLp());
         quick.addView(buttonSmall("PREFIX", () -> loadDirectory(TERMUX_PREFIX, false)), weightLp());
-        quick.addView(buttonSmall("/", () -> loadDirectory("/", false)), weightLp());
         quick.addView(buttonSmall("التخزين", () -> loadDirectory("/storage/emulated/0", false)), weightLp());
         root.addView(quick);
 
-        LinearLayout tools = new LinearLayout(this);
-        tools.setOrientation(LinearLayout.HORIZONTAL);
-        tools.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout actions = new LinearLayout(this);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        actions.setGravity(Gravity.CENTER_VERTICAL);
         Button search = button("بحث", PANEL, TEXT);
         search.setOnClickListener(v -> showSearchDialog());
-        tools.addView(search, new LinearLayout.LayoutParams(0, dp(40), 1));
-        hiddenButton = button("المخفية: ظاهرة", PANEL, ACCENT);
-        hiddenButton.setTextSize(11);
+        actions.addView(search, new LinearLayout.LayoutParams(0, dp(42), 1));
+        hiddenButton = button(showHidden ? "المخفية ظاهرة" : "المخفية مخفية", PANEL, ACCENT);
         hiddenButton.setOnClickListener(v -> {
             showHidden = !showHidden;
-            hiddenButton.setText(showHidden ? "المخفية: ظاهرة" : "المخفية: مخفية");
+            hiddenButton.setText(showHidden ? "المخفية ظاهرة" : "المخفية مخفية");
             loadDirectory(currentPath, false);
         });
-        LinearLayout.LayoutParams hlp = new LinearLayout.LayoutParams(0, dp(40), 1.4f);
-        hlp.setMargins(dp(5), 0, dp(5), 0);
-        tools.addView(hiddenButton, hlp);
+        LinearLayout.LayoutParams hiddenLp = new LinearLayout.LayoutParams(0, dp(42), 1.35f);
+        hiddenLp.setMargins(dp(6), 0, dp(6), 0);
+        actions.addView(hiddenButton, hiddenLp);
         Button refresh = button("تحديث", PANEL, TEXT);
         refresh.setOnClickListener(v -> loadDirectory(currentPath, false));
-        tools.addView(refresh, new LinearLayout.LayoutParams(0, dp(40), 1));
+        actions.addView(refresh, new LinearLayout.LayoutParams(0, dp(42), 1));
         Button create = button("+", PANEL_2, ACCENT);
-        create.setTextSize(20);
+        create.setTextSize(23);
         create.setOnClickListener(v -> showCreateMenu());
-        LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(dp(43), dp(40));
-        clp.setMargins(dp(5), 0, 0, 0);
-        tools.addView(create, clp);
-        root.addView(tools);
+        LinearLayout.LayoutParams createLp = new LinearLayout.LayoutParams(dp(44), dp(42));
+        createLp.leftMargin = dp(6);
+        actions.addView(create, createLp);
+        LinearLayout.LayoutParams actionsLp = new LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT);
+        actionsLp.topMargin = dp(8);
+        root.addView(actions, actionsLp);
 
-        TextView heading = text("الملفات والمجلدات", 14, MUTED, true);
-        heading.setPadding(dp(3), dp(8), 0, dp(4));
-        root.addView(heading);
+        TextView filesHeading = text("الملفات والمجلدات", 14, TEXT, true);
+        filesHeading.setPadding(dp(3), dp(10), 0, dp(5));
+        root.addView(filesHeading);
 
         listView = new ListView(this);
         listView.setDivider(new android.graphics.drawable.ColorDrawable(Color.rgb(34, 45, 69)));
@@ -520,79 +544,14 @@ except Exception as e:
 
         LinearLayout bottom = new LinearLayout(this);
         bottom.setGravity(Gravity.CENTER_VERTICAL);
-        bottom.setOrientation(LinearLayout.HORIZONTAL);
         statusLabel = text("جاهز", 11, MUTED, false);
         bottom.addView(statusLabel, new LinearLayout.LayoutParams(0, dp(38), 1));
-        moreButton = button("المزيد ↓", PANEL_2, ACCENT);
+        moreButton = button("تحميل المزيد", PANEL_2, ACCENT);
         moreButton.setVisibility(View.GONE);
         moreButton.setOnClickListener(v -> loadMore());
-        bottom.addView(moreButton, new LinearLayout.LayoutParams(dp(100), dp(36)));
+        bottom.addView(moreButton, new LinearLayout.LayoutParams(dp(112), dp(36)));
         root.addView(bottom);
         updatePathView();
-    }
-
-    private LinearLayout.LayoutParams weightLp() {
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(34), 1);
-        lp.setMargins(dp(2), dp(6), dp(2), dp(6));
-        return lp;
-    }
-
-    private Button buttonSmall(String label, Runnable action) {
-        Button b = button(label, PANEL_2, TEXT);
-        b.setTextSize(11);
-        b.setOnClickListener(v -> action.run());
-        return b;
-    }
-
-    private Button button(String label, int background, int color) {
-        Button b = new Button(this);
-        b.setText(label);
-        b.setTextColor(color);
-        b.setTextSize(13);
-        b.setAllCaps(false);
-        b.setMinHeight(0);
-        b.setMinimumHeight(0);
-        b.setPadding(dp(6), 0, dp(6), 0);
-        b.setBackground(round(background, 11, Color.TRANSPARENT));
-        return b;
-    }
-
-    private TextView text(String value, int size, int color, boolean bold) {
-        TextView t = new TextView(this);
-        t.setText(value);
-        t.setTextSize(size);
-        t.setTextColor(color);
-        if (bold) t.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        t.setGravity(Gravity.CENTER_VERTICAL);
-        return t;
-    }
-
-    private GradientDrawable round(int color, int radiusDp, int strokeColor) {
-        GradientDrawable d = new GradientDrawable();
-        d.setColor(color);
-        d.setCornerRadius(dp(radiusDp));
-        if (strokeColor != Color.TRANSPARENT) d.setStroke(dp(1), strokeColor);
-        return d;
-    }
-
-    private int dp(float value) {
-        return (int) (value * getResources().getDisplayMetrics().density + 0.5f);
-    }
-
-    private boolean isTermuxInstalled() {
-        try {
-            getPackageManager().getPackageInfo("com.termux", 0);
-            return true;
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
-    private void setStatus(String text, int color) {
-        if (statusLabel != null) {
-            statusLabel.setText(text);
-            statusLabel.setTextColor(color);
-        }
     }
 
     private void updatePathView() {

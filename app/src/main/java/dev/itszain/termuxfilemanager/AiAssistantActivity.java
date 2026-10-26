@@ -46,7 +46,7 @@ import java.util.regex.Pattern;
 public class AiAssistantActivity extends Activity {
     private UiTheme theme; private String lastThemeName="midnight"; private int BG,PANEL,PANEL2,TEXT,MUTED,ACCENT,DANGER,DIVIDER;
     private JSONArray chats,sessions; private String activeChatId="",attachedImage=""; private Spinner chatsSpinner,providerSpinner,terminalSpinner; private TextView modelLabel,rateLabel,attachmentLabel; private LinearLayout messagesBox; private ScrollView messagesScroll; private EditText input; private Button sendButton; private boolean receiverRegistered=false; private boolean busy=false; private boolean updatingSpinners=false;
-    private final ExecutorService worker=Executors.newFixedThreadPool(3); private final Handler handler=new Handler(Looper.getMainLooper()); private final Map<Integer,String> commandChats=new HashMap<>(); private final Map<Integer,PopupCommand> popupCommands=new HashMap<>(); private boolean autoScreenshotUsed=false;
+    private final ExecutorService worker=Executors.newFixedThreadPool(3); private final Handler handler=new Handler(Looper.getMainLooper()); private final Map<Integer,String> commandChats=new HashMap<>(); private final Map<Integer,Boolean> agentCommandRequests=new HashMap<>(); private final Map<Integer,PopupCommand> popupCommands=new HashMap<>(); private boolean autoScreenshotUsed=false;
     private static final class PopupCommand { final TextView output; final String sessionId; PopupCommand(TextView output,String sessionId){this.output=output;this.sessionId=sessionId;} }
     private final BroadcastReceiver resultReceiver=new BroadcastReceiver(){
         @Override public void onReceive(Context c,Intent i){
@@ -57,9 +57,13 @@ public class AiAssistantActivity extends Activity {
             PopupCommand popup=popupCommands.remove(id);
             if(popup!=null){appendSessionOutput(popup.sessionId,output);popup.output.append(output);return;}
             String chatId=commandChats.remove(id);if(chatId==null)return;
+            boolean agentRequest=agentCommandRequests.remove(id)!=null;
             JSONObject chat=findChat(chatId);if(chat==null)return;
             try{JSONArray m=chat.optJSONArray("messages");if(m==null)m=new JSONArray();m.put(msg("user","[مخرجات Termux]\n"+output));chat.put("messages",m);saveChats();if(chatId.equals(activeChatId))renderMessages();}catch(Exception ignored){}
-            if(AiSecureStore.settings(AiAssistantActivity.this).getBoolean("auto_analyze_results",false)){
+            if(agentRequest){
+                if(!busy) autoAnalyzeCommandResult(chatId);
+                else handler.postDelayed(()->{if(!busy)autoAnalyzeCommandResult(chatId);else Toast.makeText(AiAssistantActivity.this,"وصلت النتيجة؛ أرسل متابعة يدوية لأن الوكيل مشغول.",Toast.LENGTH_LONG).show();},1800);
+            }else if(AiSecureStore.settings(AiAssistantActivity.this).getBoolean("auto_analyze_results",false)){
                 if(!busy) autoAnalyzeCommandResult(chatId);
                 else Toast.makeText(AiAssistantActivity.this,"وصلت مخرجات Termux؛ أوقفنا التحليل التلقائي لأن هناك طلب AI جارٍ بالفعل.",Toast.LENGTH_LONG).show();
             }
@@ -76,26 +80,235 @@ public class AiAssistantActivity extends Activity {
     private void newChat(boolean rebuild){String id=Long.toString(System.nanoTime());JSONObject c=new JSONObject();try{c.put("id",id);c.put("name","دردشة "+(chats.length()+1));c.put("provider",AiSecureStore.getActiveProvider(this));c.put("sessionId",AiSecureStore.settings(this).getString("active_terminal_session",""));c.put("messages",new JSONArray());chats.put(c);activeChatId=id;saveChats();if(rebuild)rebuildChatSpinner();}catch(Exception ignored){}}
     private void saveChats(){AiSecureStore.saveArray(this,AiSecureStore.CHATS,"items",chats);AiSecureStore.settings(this).edit().putString("active_ai_chat",activeChatId).apply();}
     private void build(){
-        LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setPadding(dp(12),dp(7),dp(12),dp(9));root.setBackgroundColor(BG);setContentView(root);
-        LinearLayout header=new LinearLayout(this);header.setGravity(Gravity.CENTER_VERTICAL);Button back=button("‹",PANEL2,TEXT);back.setTextSize(26);header.addView(back,new LinearLayout.LayoutParams(dp(42),dp(42)));back.setOnClickListener(v->finish());TextView title=text("AI Assistant Agent",18,TEXT,true);LinearLayout.LayoutParams tl=new LinearLayout.LayoutParams(0,dp(42),1);tl.leftMargin=dp(6);header.addView(title,tl);Button settings=button("⚙",PANEL,TEXT);header.addView(settings,new LinearLayout.LayoutParams(dp(43),dp(40)));settings.setOnClickListener(v->startActivity(new Intent(this,AiSettingsActivity.class)));root.addView(header);
-        LinearLayout chatBar=new LinearLayout(this);chatBar.setGravity(Gravity.CENTER_VERTICAL);chatsSpinner=new Spinner(this);chatsSpinner.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,chatNames()));chatBar.addView(chatsSpinner,new LinearLayout.LayoutParams(0,dp(40),1));Button add=button("+",PANEL2,ACCENT);LinearLayout.LayoutParams al=new LinearLayout.LayoutParams(dp(42),dp(38));al.leftMargin=dp(5);chatBar.addView(add,al);Button rename=button("⋮",PANEL,TEXT);LinearLayout.LayoutParams rl=new LinearLayout.LayoutParams(dp(42),dp(38));rl.leftMargin=dp(4);chatBar.addView(rename,rl);root.addView(chatBar);chatsSpinner.setSelection(indexOfChat(activeChatId));chatsSpinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onNothingSelected(android.widget.AdapterView<?> p){}public void onItemSelected(android.widget.AdapterView<?> p,View v,int pos,long id){if(pos>=0&&pos<chats.length()){activeChatId=chats.optJSONObject(pos).optString("id");saveChats();updateHeader();renderMessages();}}});add.setOnClickListener(v->{newChat(true);updateHeader();renderMessages();});rename.setOnClickListener(v->chatMenu());
-        LinearLayout providerRow=new LinearLayout(this);providerRow.setGravity(Gravity.CENTER_VERTICAL);providerSpinner=new Spinner(this);List<String> pnames=new ArrayList<>();for(AiProvider p:AiProvider.all())pnames.add(p.name);providerSpinner.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,pnames));providerRow.addView(providerSpinner,new LinearLayout.LayoutParams(0,dp(38),1));modelLabel=text("model",10,MUTED,false);LinearLayout.LayoutParams ml=new LinearLayout.LayoutParams(0,dp(38),1);ml.leftMargin=dp(5);providerRow.addView(modelLabel,ml);root.addView(providerRow);
-        terminalSpinner=new Spinner(this);terminalSpinner.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,terminalNames()));root.addView(terminalSpinner,new LinearLayout.LayoutParams(-1,dp(36)));providerSpinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onNothingSelected(android.widget.AdapterView<?> p){}public void onItemSelected(android.widget.AdapterView<?> p,View v,int pos,long id){if(updatingSpinners)return;JSONObject c=current();if(c==null||pos<0||pos>=AiProvider.all().size())return;String provider=AiProvider.all().get(pos).id;try{c.put("provider",provider);saveChats();updateHeader();}catch(Exception ignored){}}});terminalSpinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onNothingSelected(android.widget.AdapterView<?> p){}public void onItemSelected(android.widget.AdapterView<?> p,View v,int pos,long id){if(updatingSpinners)return;JSONObject c=current();if(c!=null){try{c.put("sessionId",sessionIdAt(pos));saveChats();}catch(Exception ignored){}}}});
-        rateLabel=text("Ready · local rate limit enabled",10,MUTED,false);rateLabel.setPadding(dp(3),dp(4),0,dp(4));root.addView(rateLabel);
-        messagesScroll=new ScrollView(this);messagesBox=new LinearLayout(this);messagesBox.setOrientation(LinearLayout.VERTICAL);messagesBox.setPadding(dp(2),dp(2),dp(2),dp(4));messagesScroll.addView(messagesBox);root.addView(messagesScroll,new LinearLayout.LayoutParams(-1,0,1));
-        attachmentLabel=text("ماكو صورة مرفقة",10,MUTED,false);attachmentLabel.setPadding(dp(3),dp(3),dp(3),dp(3));root.addView(attachmentLabel);
-        input=new EditText(this);input.setTextColor(TEXT);input.setHintTextColor(MUTED);input.setTextSize(14);input.setGravity(Gravity.TOP|Gravity.START);input.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_FLAG_MULTI_LINE|InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);input.setMinLines(2);input.setMaxLines(6);input.setHint("احچي ويا الوكيل: حلل الخطأ، اقترح إصلاحًا أو أوامر…");input.setPadding(dp(10),dp(7),dp(10),dp(7));input.setBackground(round(PANEL2,11,DIVIDER));root.addView(input,new LinearLayout.LayoutParams(-1,dp(90)));
-        LinearLayout actions=new LinearLayout(this);Button send=button("إرسال",PANEL2,ACCENT);Button all=button("إرسال لكل الدردشات",PANEL,TEXT);Button screenshot=button("لقطة",PANEL,TEXT);Button sessionsBtn=button("Terminal",PANEL,TEXT);actions.addView(send,new LinearLayout.LayoutParams(0,dp(42),1));LinearLayout.LayoutParams x=new LinearLayout.LayoutParams(0,dp(42),1);x.leftMargin=dp(4);actions.addView(all,x);LinearLayout.LayoutParams sx=new LinearLayout.LayoutParams(dp(54),dp(42));sx.leftMargin=dp(4);actions.addView(screenshot,sx);LinearLayout.LayoutParams tx=new LinearLayout.LayoutParams(dp(74),dp(42));tx.leftMargin=dp(4);actions.addView(sessionsBtn,tx);root.addView(actions);
-        sendButton=send;send.setOnClickListener(v->sendCurrent());all.setOnClickListener(v->broadcastPrompt());screenshot.setOnClickListener(v->captureOrAttach());sessionsBtn.setOnClickListener(v->showTerminalPopup());
-        LinearLayout bottom=new LinearLayout(this);Button open=button("فتح Termux",PANEL,TEXT);Button clearShot=button("حذف آخر لقطة",PANEL,TEXT);Button stopCapture=button("إيقاف مشاركة الشاشة",PANEL,DANGER);bottom.addView(open,new LinearLayout.LayoutParams(0,dp(34),1));LinearLayout.LayoutParams cl=new LinearLayout.LayoutParams(0,dp(34),1);cl.leftMargin=dp(4);bottom.addView(clearShot,cl);LinearLayout.LayoutParams sc=new LinearLayout.LayoutParams(0,dp(34),1);sc.leftMargin=dp(4);bottom.addView(stopCapture,sc);open.setOnClickListener(v->{try{Intent i=getPackageManager().getLaunchIntentForPackage("com.termux");if(i!=null)startActivity(i);else alert("Termux غير مثبت.");}catch(Exception e){alert(e.getMessage());}});clearShot.setOnClickListener(v->{AiSecureStore.clearLastScreenshot(this);attachedImage="";attachmentLabel.setText("ماكو صورة مرفقة");Toast.makeText(this,"تم حذف آخر لقطة من مساحة التطبيق",Toast.LENGTH_SHORT).show();});stopCapture.setOnClickListener(v->{try{startService(new Intent(this,ScreenCaptureService.class).setAction(ScreenCaptureService.ACTION_STOP));}catch(Exception ignored){}AiSecureStore.setCaptureActive(this,false);Toast.makeText(this,"تم طلب إيقاف مشاركة الشاشة",Toast.LENGTH_SHORT).show();});root.addView(bottom);
-        updateHeader();renderMessages();
+        LinearLayout root=new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(dp(14),dp(8),dp(14),dp(10));
+        root.setBackgroundColor(BG);
+        setContentView(root);
+
+        LinearLayout header=new LinearLayout(this);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        Button back=button("‹",PANEL2,TEXT); back.setTextSize(26);
+        header.addView(back,new LinearLayout.LayoutParams(dp(42),dp(42)));
+        back.setOnClickListener(v->finish());
+        LinearLayout titleBox=new LinearLayout(this); titleBox.setOrientation(LinearLayout.VERTICAL);
+        titleBox.addView(text("AI Agent",19,TEXT,true));
+        titleBox.addView(text("وكيل برمجي متصل بـ Termux",11,MUTED,false));
+        LinearLayout.LayoutParams titleLp=new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1); titleLp.leftMargin=dp(8);
+        header.addView(titleBox,titleLp);
+        Button settings=button("⚙",PANEL,TEXT); header.addView(settings,new LinearLayout.LayoutParams(dp(44),dp(40)));
+        settings.setOnClickListener(v->startActivity(new Intent(this,AiSettingsActivity.class)));
+        root.addView(header);
+
+        LinearLayout chatBar=new LinearLayout(this); chatBar.setGravity(Gravity.CENTER_VERTICAL);
+        chatsSpinner=new Spinner(this); chatsSpinner.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,chatNames()));
+        chatBar.addView(chatsSpinner,new LinearLayout.LayoutParams(0,dp(42),1));
+        Button add=button("+",PANEL2,ACCENT); chatBar.addView(add,new LinearLayout.LayoutParams(dp(42),dp(40)));
+        LinearLayout.LayoutParams menuLp=new LinearLayout.LayoutParams(dp(42),dp(40)); menuLp.leftMargin=dp(5);
+        Button chatMenuButton=button("⋮",PANEL,TEXT); chatBar.addView(chatMenuButton,menuLp);
+        root.addView(chatBar);
+        chatsSpinner.setSelection(indexOfChat(activeChatId));
+        chatsSpinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){
+            public void onNothingSelected(android.widget.AdapterView<?> p){}
+            public void onItemSelected(android.widget.AdapterView<?> p,View v,int pos,long id){
+                if(pos>=0&&pos<chats.length()){activeChatId=chats.optJSONObject(pos).optString("id");saveChats();updateHeader();renderMessages();}
+            }
+        });
+        add.setOnClickListener(v->{newChat(true);updateHeader();renderMessages();});
+        chatMenuButton.setOnClickListener(v->chatMenu());
+
+        TextView providerTitle=text("المزوّد",11,MUTED,true);
+        LinearLayout.LayoutParams smallTop=match(); smallTop.topMargin=dp(5);
+        root.addView(providerTitle,smallTop);
+        providerSpinner=new Spinner(this); List<String> pnames=new ArrayList<>();
+        for(AiProvider p:AiProvider.all())pnames.add(p.name);
+        providerSpinner.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,pnames));
+        root.addView(providerSpinner,new LinearLayout.LayoutParams(-1,dp(40)));
+        modelLabel=text("Model",10,MUTED,false);
+        modelLabel.setPadding(dp(3),dp(2),0,dp(2)); root.addView(modelLabel);
+
+        TextView terminalTitle=text("سياق جلسة Termux",11,MUTED,true);
+        root.addView(terminalTitle);
+        terminalSpinner=new Spinner(this); terminalSpinner.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,terminalNames()));
+        root.addView(terminalSpinner,new LinearLayout.LayoutParams(-1,dp(38)));
+        providerSpinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){
+            public void onNothingSelected(android.widget.AdapterView<?> p){}
+            public void onItemSelected(android.widget.AdapterView<?> p,View v,int pos,long id){
+                if(updatingSpinners)return; JSONObject c=current(); if(c==null||pos<0||pos>=AiProvider.all().size())return;
+                try{c.put("provider",AiProvider.all().get(pos).id);saveChats();updateHeader();}catch(Exception ignored){}
+            }
+        });
+        terminalSpinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){
+            public void onNothingSelected(android.widget.AdapterView<?> p){}
+            public void onItemSelected(android.widget.AdapterView<?> p,View v,int pos,long id){
+                if(updatingSpinners)return; JSONObject c=current();
+                if(c!=null)try{c.put("sessionId",sessionIdAt(pos));saveChats();}catch(Exception ignored){}
+            }
+        });
+
+        rateLabel=text("جاهز",10,MUTED,false); rateLabel.setPadding(dp(3),dp(3),0,dp(4)); root.addView(rateLabel);
+        messagesScroll=new ScrollView(this); messagesScroll.setFillViewport(true);
+        messagesBox=new LinearLayout(this); messagesBox.setOrientation(LinearLayout.VERTICAL);
+        messagesBox.setPadding(dp(2),dp(2),dp(2),dp(5)); messagesScroll.addView(messagesBox);
+        root.addView(messagesScroll,new LinearLayout.LayoutParams(-1,0,1));
+
+        attachmentLabel=text("ماكو صورة مرفقة",10,MUTED,false);
+        attachmentLabel.setPadding(dp(3),dp(3),dp(3),dp(3)); root.addView(attachmentLabel);
+        input=new EditText(this); input.setTextColor(TEXT); input.setHintTextColor(MUTED); input.setTextSize(14);
+        input.setGravity(Gravity.TOP|Gravity.START);
+        input.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_FLAG_MULTI_LINE|InputType.TYPE_TEXT_FLAG_CAP_SENTENCES|InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        input.setMinLines(2); input.setMaxLines(5);
+        input.setHint("اكتب الهدف؛ الوكيل يفحص، ينفّذ أداة، ويراجع النتيجة…");
+        input.setPadding(dp(12),dp(9),dp(12),dp(9)); input.setBackground(round(PANEL2,13,DIVIDER));
+        root.addView(input,new LinearLayout.LayoutParams(-1,dp(88)));
+
+        LinearLayout actions=new LinearLayout(this); actions.setGravity(Gravity.CENTER_VERTICAL);
+        Button send=button("إرسال إلى الوكيل",ACCENT,BG);
+        actions.addView(send,new LinearLayout.LayoutParams(0,dp(44),1));
+        Button screenshot=button("لقطة",PANEL,TEXT);
+        LinearLayout.LayoutParams shotLp=new LinearLayout.LayoutParams(dp(76),dp(44)); shotLp.leftMargin=dp(6);
+        actions.addView(screenshot,shotLp);
+        Button more=button("⋮",PANEL,TEXT); more.setTextSize(21);
+        LinearLayout.LayoutParams moreLp=new LinearLayout.LayoutParams(dp(44),dp(44)); moreLp.leftMargin=dp(6);
+        actions.addView(more,moreLp); root.addView(actions);
+        sendButton=send; send.setOnClickListener(v->sendCurrent());
+        screenshot.setOnClickListener(v->captureOrAttach());
+        more.setOnClickListener(v->showAgentMenu());
+        updateHeader(); renderMessages();
     }
+
     private void updateHeader(){JSONObject c=current();if(c==null)return;String provider=c.optString("provider",AiSecureStore.getActiveProvider(this));int pi=AiProvider.indexOf(provider);updatingSpinners=true;if(providerSpinner.getSelectedItemPosition()!=pi)providerSpinner.setSelection(pi);AiProvider p=AiProvider.byId(provider);modelLabel.setText("Model: "+AiSecureStore.getModel(this,p.id));rateLabel.setText("متبقي اليوم: "+AiSecureStore.remainingRequests(this,p.id)+" طلب · حدود محلية");int si=indexOfSession(c.optString("sessionId",""));if(terminalSpinner!=null&&terminalSpinner.getSelectedItemPosition()!=si)terminalSpinner.setSelection(Math.max(0,si));updatingSpinners=false;}
     private void renderMessages(){if(messagesBox==null)return;messagesBox.removeAllViews();JSONObject c=current();if(c==null)return;JSONArray m=c.optJSONArray("messages");if(m==null||m.length()==0){TextView welcome=text("المساعد جاهز. اضبط المزوّد والمفتاح من ⚙. اربط الدردشة بجلسة Terminal للحصول على سياق آخر مخرجاتها. كل أمر يقترحه الذكاء الاصطناعي يحتاج موافقتك قبل التنفيذ.",13,MUTED,false);welcome.setPadding(dp(12),dp(12),dp(12),dp(12));welcome.setBackground(round(PANEL,12,DIVIDER));messagesBox.addView(welcome,match());return;}for(int i=0;i<m.length();i++){JSONObject msg=m.optJSONObject(i);if(msg!=null)addMessageView(msg,c.optString("id"));}messagesScroll.post(()->messagesScroll.fullScroll(View.FOCUS_DOWN));}
-    private void addMessageView(JSONObject m,String chatId){String role=m.optString("role","user"),txt=m.optString("text","");boolean assistant="assistant".equals(role);boolean terminal="terminal".equals(role);LinearLayout bubble=new LinearLayout(this);bubble.setOrientation(LinearLayout.VERTICAL);bubble.setPadding(dp(10),dp(8),dp(10),dp(8));bubble.setBackground(round(assistant?PANEL2:(terminal?Color.rgb(32,38,46):PANEL),11,assistant?ACCENT:DIVIDER));TextView label=text(assistant?AiProvider.byId(providerFor(chatId)).name:(terminal?"TERMUX":"أنت"),10,assistant?ACCENT:MUTED,true);bubble.addView(label,match());TextView content=text(txt,13,TEXT,false);content.setTextIsSelectable(true);content.setTypeface(assistant?Typeface.DEFAULT:Typeface.DEFAULT);content.setGravity(Gravity.TOP|Gravity.START);LinearLayout.LayoutParams cp=match();cp.topMargin=dp(3);bubble.addView(content,cp);
-        if(assistant){String code=firstCodeBlock(txt);if(!code.trim().isEmpty()){Button run=button("مراجعة وتنفيذ أمر من الرد",PANEL,ACCENT);run.setOnClickListener(v->confirmSuggestedCommand(chatId,code));bubble.addView(run,match());}Button copy=button("نسخ الرد",PANEL,TEXT);copy.setOnClickListener(v->{ClipboardManager cm=(ClipboardManager)getSystemService(CLIPBOARD_SERVICE);cm.setPrimaryClip(ClipData.newPlainText("AI response",txt));Toast.makeText(this,"انسخ الرد",Toast.LENGTH_SHORT).show();});bubble.addView(copy,match());}
-        LinearLayout.LayoutParams p=match();p.topMargin=dp(4);p.gravity=assistant?Gravity.START:Gravity.END;p.width=ViewGroup.LayoutParams.MATCH_PARENT;messagesBox.addView(bubble,p);
+    private void addMessageView(JSONObject m,String chatId){
+        String role=m.optString("role","user"),txt=m.optString("text","");
+        boolean assistant="assistant".equals(role),terminal="terminal".equals(role);
+        LinearLayout bubble=new LinearLayout(this); bubble.setOrientation(LinearLayout.VERTICAL);
+        bubble.setPadding(dp(11),dp(9),dp(11),dp(9));
+        bubble.setBackground(round(assistant?PANEL2:(terminal?Color.rgb(27,34,42):PANEL),13,assistant?ACCENT:DIVIDER));
+        TextView label=text(assistant?AiProvider.byId(providerFor(chatId)).name:(terminal?"TERMUX":"أنت"),10,assistant?ACCENT:MUTED,true);
+        bubble.addView(label,match());
+        JSONObject action=assistant?extractAgentAction(txt):null;
+        if(action!=null){
+            String reason=action.optString("reason","الوكيل يحتاج تنفيذ أداة حتى يكمّل المهمة.");
+            String command=agentCommand(action);
+            TextView description=text(reason,13,TEXT,false); description.setPadding(0,dp(4),0,dp(5)); bubble.addView(description,match());
+            TextView code=text("$ "+command,12,TEXT,false); code.setTypeface(Typeface.MONOSPACE); code.setTextIsSelectable(true);
+            code.setPadding(dp(9),dp(9),dp(9),dp(9)); code.setBackground(round(BG,9,DIVIDER)); bubble.addView(code,match());
+            Button run=button("مراجعة وتشغيل الأداة",ACCENT,BG); run.setOnClickListener(v->confirmAgentAction(chatId,action)); bubble.addView(run,match());
+            Button copy=button("نسخ الأمر",PANEL,TEXT); copy.setOnClickListener(v->copyText("AI command",command)); bubble.addView(copy,match());
+        }else{
+            addMarkdownContent(bubble,txt,chatId);
+        }
+        LinearLayout.LayoutParams p=match(); p.topMargin=dp(5); p.width=ViewGroup.LayoutParams.MATCH_PARENT;
+        p.gravity=assistant?Gravity.START:Gravity.END; messagesBox.addView(bubble,p);
     }
+
+    private void addMarkdownContent(LinearLayout target,String source,String chatId){
+        Matcher matcher=Pattern.compile("```([a-zA-Z0-9_+.-]*)\\s*([\\s\\S]*?)```").matcher(source==null?"":source);
+        int cursor=0;
+        while(matcher.find()){
+            addMarkdownText(target,source.substring(cursor,matcher.start()));
+            addCodeCard(target,matcher.group(1),matcher.group(2).trim(),chatId);
+            cursor=matcher.end();
+        }
+        if(cursor==0){addMarkdownText(target,source==null?"":source);}
+        else if(cursor<(source==null?0:source.length())) addMarkdownText(target,source.substring(cursor));
+    }
+
+    private void addMarkdownText(LinearLayout target,String raw){
+        if(raw==null||raw.trim().isEmpty())return;
+        String[] lines=raw.split("\\r?\\n");
+        for(String original:lines){
+            String line=original.trim(); if(line.isEmpty())continue;
+            boolean heading=line.startsWith("#");
+            if(heading){line=line.replaceFirst("^#{1,4}\\s*","");}
+            else if(line.startsWith("- ")||line.startsWith("* "))line="• "+line.substring(2);
+            else if(line.matches("^[0-9]+[.)]\\s+.*"))line="• "+line.replaceFirst("^[0-9]+[.)]\\s+","");
+            line=line.replace("**","").replace("__","");
+            line=line.replaceAll("`([^`]+)`","$1");
+            TextView row=text(line,heading?15:13,TEXT,heading);
+            row.setGravity(Gravity.TOP|Gravity.START); row.setTextIsSelectable(true);
+            LinearLayout.LayoutParams lp=match(); lp.topMargin=dp(1); lp.bottomMargin=dp(3); target.addView(row,lp);
+        }
+    }
+
+    private void addCodeCard(LinearLayout target,String language,String code,String chatId){
+        if(code==null||code.trim().isEmpty())return;
+        LinearLayout card=new LinearLayout(this); card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(9),dp(8),dp(9),dp(8)); card.setBackground(round(BG,10,DIVIDER));
+        String lang=language==null?"":language.trim().toLowerCase();
+        card.addView(text(lang.isEmpty()?"CODE":("CODE · "+lang),10,ACCENT,true),match());
+        TextView body=text(code,12,TEXT,false); body.setTypeface(Typeface.MONOSPACE); body.setTextIsSelectable(true);
+        body.setGravity(Gravity.TOP|Gravity.START); LinearLayout.LayoutParams bodyLp=match(); bodyLp.topMargin=dp(4); card.addView(body,bodyLp);
+        LinearLayout actions=new LinearLayout(this); actions.setGravity(Gravity.END|Gravity.CENTER_VERTICAL);
+        Button copy=button("نسخ",PANEL,TEXT); copy.setOnClickListener(v->copyText("Code",code));
+        actions.addView(copy,new LinearLayout.LayoutParams(dp(72),dp(36)));
+        if(lang.isEmpty()||lang.equals("bash")||lang.equals("sh")||lang.equals("shell")||lang.equals("termux")||lang.equals("zsh")){
+            Button run=button("تشغيل في Termux",PANEL2,ACCENT); LinearLayout.LayoutParams runLp=new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,dp(36)); runLp.leftMargin=dp(6);
+            run.setOnClickListener(v->confirmSuggestedCommand(chatId,code)); actions.addView(run,runLp);
+        }
+        LinearLayout.LayoutParams aLp=match(); aLp.topMargin=dp(6); card.addView(actions,aLp);
+        LinearLayout.LayoutParams p=match(); p.topMargin=dp(4); target.addView(card,p);
+    }
+
+    private void copyText(String label,String value){
+        ClipboardManager cm=(ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
+        cm.setPrimaryClip(ClipData.newPlainText(label,value));
+        Toast.makeText(this,"تم النسخ",Toast.LENGTH_SHORT).show();
+    }
+
+    private JSONObject extractAgentAction(String source){
+        if(source==null||source.trim().isEmpty())return null;
+        Matcher code=Pattern.compile("```(?:json)?\\s*([\\s\\S]*?)```").matcher(source);
+        while(code.find()){JSONObject found=parseAgentActionCandidate(code.group(1));if(found!=null)return found;}
+        JSONObject direct=parseAgentActionCandidate(source.trim());if(direct!=null)return direct;
+        int marker=source.indexOf("\\\"tfm_action\\\"");
+        if(marker<0)marker=source.indexOf("\"tfm_action\"");
+        if(marker>=0){
+            int start=source.lastIndexOf('{',marker);
+            for(int end=source.lastIndexOf('}');start>=0&&end>=start;end=source.lastIndexOf('}',end-1)){
+                JSONObject found=parseAgentActionCandidate(source.substring(start,end+1));if(found!=null)return found;
+            }
+        }
+        return null;
+    }
+
+    private JSONObject parseAgentActionCandidate(String candidate){
+        try{JSONObject root=new JSONObject(candidate.trim());return root.optJSONObject("tfm_action");}catch(Exception ignored){return null;}
+    }
+
+    private String agentCommand(JSONObject action){
+        JSONObject args=action.optJSONObject("arguments");
+        String command=action.optString("command","");
+        if(command.isEmpty()&&args!=null)command=args.optString("command","");
+        return command;
+    }
+
+    private void confirmAgentAction(String chatId,JSONObject action){
+        JSONObject chat=findChat(chatId); if(chat==null)return;
+        String tool=action.optString("tool",action.optString("name","run_shell"));
+        if(!"run_shell".equals(tool)&&!"shell".equals(tool)&&!"run_command".equals(tool)){
+            alert("الأداة المطلوبة غير مدعومة بعد: "+tool+". استخدم run_shell لتنفيذ أوامر Termux."); return;
+        }
+        String command=agentCommand(action); if(command.trim().isEmpty()){alert("الوكيل رجّع أداة بدون أمر قابل للتنفيذ.");return;}
+        String sid=chat.optString("sessionId",""); JSONObject session=AiSecureStore.findById(sessions,sid);
+        JSONObject args=action.optJSONObject("arguments");
+        String fallback=session==null?"~/":session.optString("workdir","~/");
+        String workdir=action.optString("workdir",args==null?fallback:args.optString("workdir",fallback));
+        String reason=action.optString("reason","تنفيذ أداة يحتاجها الوكيل حتى يكمل المهمة.");
+        String risk=action.optString("risk","راجع الأمر قبل التشغيل");
+        new AlertDialog.Builder(this).setTitle("موافقة على أداة الوكيل")
+                .setMessage(reason+"\n\nمستوى المخاطرة: "+risk+"\nمجلد التشغيل: "+workdir+"\n\n"+command+"\n\nسيُنفّذ الأمر داخل Termux بصلاحيات المستخدم الحالية.")
+                .setPositiveButton("موافقة وتشغيل",(d,w)->{
+                    try{
+                        int request=TermuxCommandRunner.run(this,command,workdir,"TFM AI Agent tool",true);
+                        commandChats.put(request,chatId); agentCommandRequests.put(request,Boolean.TRUE);
+                        Toast.makeText(this,"اشتغلت الأداة. الوكيل راح يقرأ المخرجات ويقرر الخطوة التالية.",Toast.LENGTH_LONG).show();
+                    }catch(Exception e){alert(e.getMessage());}
+                }).setNeutralButton("نسخ الأمر",(d,w)->copyText("AI command",command))
+                .setNegativeButton("إلغاء",null).show();
+    }
+
     private String providerFor(String chatId){JSONObject c=findChat(chatId);return c==null?"gemini":c.optString("provider","gemini");}
     private void sendCurrent(){String text=input.getText().toString().trim();if(text.isEmpty())return;if(busy){Toast.makeText(this,"انتظر الرد الحالي أو افتح دردشة أخرى",Toast.LENGTH_SHORT).show();return;}JSONObject c=current();if(c==null)return;String image=attachedImage;attachedImage="";autoScreenshotUsed=false;attachmentLabel.setText("ماكو صورة مرفقة");input.setText("");appendChatMessage(c,"user",text);String sid=c.optString("sessionId","");String enriched=withTerminalContext(text,sid);JSONArray requestHistory=apiHistory(c);if(requestHistory.length()>0){try{requestHistory.put(requestHistory.length()-1,new JSONObject().put("role","user").put("text",enriched));}catch(Exception ignored){}}saveChats();renderMessages();busy=true;sendButton.setEnabled(false);rateLabel.setText("جاري الاتصال بالمزوّد…");final String chatId=c.optString("id"),providerId=c.optString("provider",AiSecureStore.getActiveProvider(this));final String model=AiSecureStore.getModel(this,providerId),endpoint=AiSecureStore.getEndpoint(this,providerId),imagePath=image;
         worker.execute(()->{String response;try{String key=AiSecureStore.getKey(this,providerId);response=AiApiClient.send(this,AiProvider.byId(providerId),model,endpoint,key,requestHistory,imagePath,2048);}catch(Exception e){response="[تعذر إكمال الطلب]\n"+e.getMessage();}final String result=response;runOnUiThread(()->{JSONObject live=findChat(chatId);String visible=result.replace("[TFM_SCREENSHOT]","").replace("[REQUEST_SCREENSHOT]","").trim();if(live!=null){appendChatMessage(live,"assistant",visible);saveChats();}boolean requested=(result.contains("[TFM_SCREENSHOT]")||result.contains("[REQUEST_SCREENSHOT]"));if(requested&&!autoScreenshotUsed){autoScreenshotUsed=true;beginAgentScreenshotCapture(chatId,providerId,model,endpoint);return;}else{busy=false;sendButton.setEnabled(true);}updateHeader();renderMessages();});});
@@ -172,6 +385,18 @@ public class AiAssistantActivity extends Activity {
         JSONArray history=apiHistory(chat);
         worker.execute(()->{String answer;try{answer=AiApiClient.send(this,AiProvider.byId(providerId),model,endpoint,AiSecureStore.getKey(this,providerId),history,image,2048);}catch(Exception e){answer="[تعذر تحليل لقطة الشاشة]\n"+e.getMessage();}final String result=answer;runOnUiThread(()->{JSONObject live=findChat(chatId);String visible=result.replace("[TFM_SCREENSHOT]","").replace("[REQUEST_SCREENSHOT]","").trim();if(live!=null){appendChatMessage(live,"assistant",visible);saveChats();}busy=false;if(sendButton!=null)sendButton.setEnabled(true);updateHeader();renderMessages();if(result.contains("[TFM_SCREENSHOT]")||result.contains("[REQUEST_SCREENSHOT]"))Toast.makeText(this,"تجاهلنا طلب لقطة إضافية في نفس الدور لمنع الالتقاط المتكرر.",Toast.LENGTH_LONG).show();});});
     }
+    private void showAgentMenu(){
+        String[] items={"إرسال الطلب إلى كل الدردشات","إدارة جلسات Terminal","أوامر Terminal سريعة","فتح تطبيق Termux","حذف آخر لقطة","إيقاف مشاركة الشاشة"};
+        new AlertDialog.Builder(this).setTitle("أدوات الوكيل").setItems(items,(d,w)->{
+            if(w==0)broadcastPrompt();
+            else if(w==1)startActivity(new Intent(this,TerminalSessionsActivity.class));
+            else if(w==2)showTerminalPopup();
+            else if(w==3)openTermux();
+            else if(w==4){AiSecureStore.clearLastScreenshot(this);attachedImage="";attachmentLabel.setText("ماكو صورة مرفقة");Toast.makeText(this,"تم حذف آخر لقطة",Toast.LENGTH_SHORT).show();}
+            else {try{startService(new Intent(this,ScreenCaptureService.class).setAction(ScreenCaptureService.ACTION_STOP));}catch(Exception ignored){}AiSecureStore.setCaptureActive(this,false);Toast.makeText(this,"تم طلب إيقاف مشاركة الشاشة",Toast.LENGTH_SHORT).show();}
+        }).show();
+    }
+
     private void showTerminalPopup(){
         sessions=AiSecureStore.loadArray(this,AiSecureStore.SESSIONS,"items");if(sessions.length()==0){startActivity(new Intent(this,TerminalSessionsActivity.class));return;}
         android.app.Dialog dialog=new android.app.Dialog(this);LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);box.setPadding(dp(12),dp(10),dp(12),dp(12));box.setBackground(round(BG,16,DIVIDER));

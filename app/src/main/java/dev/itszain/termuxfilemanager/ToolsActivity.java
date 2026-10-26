@@ -55,117 +55,82 @@ public class ToolsActivity extends Activity {
     @Override protected void onDestroy(){if(receiverRegistered)try{unregisterReceiver(resultReceiver);}catch(Exception ignored){}super.onDestroy();}
 
     private void buildUi() {
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(BG);
-        root.setPadding(dp(16), dp(8), dp(16), dp(12));
-        setContentView(root);
+        LinearLayout root=new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundColor(BG); root.setPadding(dp(15),dp(8),dp(15),dp(10)); setContentView(root);
+        LinearLayout header=new LinearLayout(this); header.setGravity(Gravity.CENTER_VERTICAL);
+        Button back=button("‹",PANEL_2,TEXT); back.setTextSize(26); header.addView(back,new LinearLayout.LayoutParams(dp(44),dp(44))); back.setOnClickListener(v->finish());
+        LinearLayout titleBox=new LinearLayout(this); titleBox.setOrientation(LinearLayout.VERTICAL);
+        titleBox.addView(text("مركز الأدوات",20,TEXT,true)); titleBox.addView(text("أوامر وحزم وتشخيص Termux",11,MUTED,false));
+        LinearLayout.LayoutParams titleLp=new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1); titleLp.leftMargin=dp(7); header.addView(titleBox,titleLp);
+        Button terminal=button("Terminal",PANEL_2,TEXT); header.addView(terminal,new LinearLayout.LayoutParams(dp(84),dp(40)));
+        terminal.setOnClickListener(v->startActivity(new Intent(this,TerminalSessionsActivity.class))); root.addView(header);
+        TextView note=text("كل العمليات تعمل بصلاحيات Termux العادية. راجع أوامر التثبيت والتعديل قبل الموافقة.",11,MUTED,false);
+        note.setPadding(dp(3),dp(5),dp(3),dp(8)); root.addView(note);
 
-        LinearLayout header = new LinearLayout(this);
-        header.setGravity(Gravity.CENTER_VERTICAL);
-        Button back = button("‹", PANEL_2, TEXT);
-        back.setTextSize(28);
-        header.addView(back, new LinearLayout.LayoutParams(dp(48), dp(46)));
-        back.setOnClickListener(v -> finish());
-        TextView title = text("مركز أدوات Termux", 20, TEXT, true);
-        LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(0, dp(46), 1);
-        titleLp.setMargins(dp(8), 0, 0, 0);
-        header.addView(title, titleLp);
-        root.addView(header);
-        TextView subtitle = text("أوامر Shell، الحزم، المكتبات، لغات البرمجة وأدوات التطوير — التنفيذ يتم داخل Termux.", 12, MUTED, false);
-        subtitle.setGravity(Gravity.TOP | Gravity.START);
-        subtitle.setPadding(dp(3), dp(4), dp(3), dp(12));
-        root.addView(subtitle);
-        LinearLayout workspace = new LinearLayout(this); workspace.setGravity(Gravity.CENTER_VERTICAL);
-        Button sessionsButton=button("Terminal Sessions / TUI",PANEL_2,TEXT); sessionsButton.setOnClickListener(v->startActivity(new Intent(this,TerminalSessionsActivity.class)));
-        Button settingsButton=button("الإعدادات",PANEL_2,TEXT); settingsButton.setOnClickListener(v->startActivity(new Intent(this,AiSettingsActivity.class)));
-        workspace.addView(sessionsButton,new LinearLayout.LayoutParams(0,dp(40),1)); LinearLayout.LayoutParams setLp=new LinearLayout.LayoutParams(dp(90),dp(40));setLp.leftMargin=dp(5);workspace.addView(settingsButton,setLp);root.addView(workspace);
-
-        ScrollView scroll = new ScrollView(this);
-        scroll.setFillViewport(false);
-        LinearLayout content = new LinearLayout(this);
-        content.setOrientation(LinearLayout.VERTICAL);
-        scroll.addView(content);
-        root.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
-
-        content.addView(sectionTitle("تنفيذ الأوامر"));
-        LinearLayout commandCard = card();
-        TextView commandNote = text("اكتب أي أمر أو سكربت متعدد الأسطر. تقدر تستخدم أدوات Termux المثبتة، أوامر pkg وpip وnpm وgit والمترجمات وغيرها.", 12, MUTED, false);
-        commandNote.setGravity(Gravity.TOP | Gravity.START);
-        commandCard.addView(commandNote, matchWrap());
-        commandInput = new EditText(this);
-        commandInput.setTextColor(TEXT);
-        commandInput.setHintTextColor(MUTED);
-        commandInput.setHint("مثال: pkg install python\npython --version\nls -la");
-        commandInput.setTextSize(13);
-        commandInput.setTypeface(Typeface.MONOSPACE);
-        commandInput.setGravity(Gravity.TOP | Gravity.START);
-        commandInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
-        commandInput.setMinLines(4);
-        commandInput.setMaxLines(12);
-        commandInput.setPadding(dp(11), dp(10), dp(11), dp(10));
-        commandInput.setBackground(round(PANEL_2, 10, Color.rgb(58, 75, 103)));
-        LinearLayout.LayoutParams commandLp = matchWrap();
-        commandLp.topMargin = dp(10);
-        commandCard.addView(commandInput, commandLp);
-        TextView workdirLabel = text("مجلد التشغيل (WORKDIR)", 12, MUTED, true);
-        LinearLayout.LayoutParams labelLp = matchWrap();
-        labelLp.topMargin = dp(10);
-        commandCard.addView(workdirLabel, labelLp);
-        workdirInput = new EditText(this);
-        workdirInput.setSingleLine(true);
-        workdirInput.setText("~/");
-        workdirInput.setTextColor(TEXT);
-        workdirInput.setHintTextColor(MUTED);
-        workdirInput.setTextSize(13);
-        workdirInput.setPadding(dp(10), 0, dp(10), 0);
-        workdirInput.setBackground(round(PANEL_2, 9, Color.TRANSPARENT));
-        LinearLayout.LayoutParams workLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(43));
-        workLp.topMargin = dp(5);
-        commandCard.addView(workdirInput, workLp);
-        Button run = button("▶  RUN IN TERMUX", ACCENT, BG);
-        LinearLayout.LayoutParams runLp = matchWrap();
-        runLp.topMargin = dp(12);
-        commandCard.addView(run, runLp);
-        run.setOnClickListener(v -> confirmAndRun(commandInput.getText().toString(), workdirInput.getText().toString(), "أمر من مركز الأدوات"));
-        outputView=text("مخرجات التنفيذ تظهر هنا داخل التطبيق.",11,TEXT,false); outputView.setTypeface(Typeface.MONOSPACE); outputView.setTextIsSelectable(true); outputView.setGravity(Gravity.TOP|Gravity.START); outputView.setPadding(dp(8),dp(8),dp(8),dp(8)); outputView.setBackground(round(PANEL,9,Color.rgb(42,53,77))); LinearLayout.LayoutParams outLp=matchWrap();outLp.topMargin=dp(9);commandCard.addView(outputView,new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(118)));
+        ScrollView scroll=new ScrollView(this); LinearLayout content=new LinearLayout(this); content.setOrientation(LinearLayout.VERTICAL); scroll.addView(content);
+        root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
+        content.addView(sectionTitle("منفّذ الأوامر"));
+        LinearLayout commandCard=card();
+        commandCard.addView(text("نفّذ أوامر Shell أو سكربت متعدد الأسطر، وشاهد الخرج هنا.",12,MUTED,false),matchWrap());
+        commandInput=new EditText(this); commandInput.setTextColor(TEXT); commandInput.setHintTextColor(MUTED); commandInput.setHint("pkg list-installed\npython --version\nls -la");
+        commandInput.setTextSize(13); commandInput.setTypeface(Typeface.MONOSPACE); commandInput.setGravity(Gravity.TOP|Gravity.START);
+        commandInput.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_FLAG_MULTI_LINE|InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        commandInput.setMinLines(3); commandInput.setMaxLines(8); commandInput.setPadding(dp(11),dp(10),dp(11),dp(10)); commandInput.setBackground(round(PANEL_2,11,DIVIDER));
+        LinearLayout.LayoutParams commandLp=matchWrap(); commandLp.topMargin=dp(8); commandCard.addView(commandInput,commandLp);
+        TextView workLabel=text("مجلد التشغيل",11,MUTED,true); LinearLayout.LayoutParams workLabelLp=matchWrap(); workLabelLp.topMargin=dp(8); commandCard.addView(workLabel,workLabelLp);
+        workdirInput=new EditText(this); workdirInput.setSingleLine(true); workdirInput.setText("~/"); workdirInput.setTextColor(TEXT); workdirInput.setHintTextColor(MUTED);
+        workdirInput.setTextSize(13); workdirInput.setPadding(dp(10),0,dp(10),0); workdirInput.setBackground(round(PANEL_2,10,DIVIDER));
+        LinearLayout.LayoutParams workLp=new LinearLayout.LayoutParams(-1,dp(42)); workLp.topMargin=dp(4); commandCard.addView(workdirInput,workLp);
+        Button run=button("▶ تشغيل داخل Termux",ACCENT,BG); LinearLayout.LayoutParams runLp=matchWrap(); runLp.topMargin=dp(9); commandCard.addView(run,runLp);
+        run.setOnClickListener(v->confirmAndRun(commandInput.getText().toString(),workdirInput.getText().toString(),"أمر من مركز الأدوات"));
+        outputView=text("بانتظار تنفيذ أمر…",12,TEXT,false); outputView.setTypeface(Typeface.MONOSPACE); outputView.setTextIsSelectable(true);
+        outputView.setGravity(Gravity.TOP|Gravity.START); outputView.setPadding(dp(10),dp(9),dp(10),dp(9)); outputView.setBackground(round(Color.rgb(13,17,23),10,DIVIDER));
+        LinearLayout.LayoutParams outputLp=new LinearLayout.LayoutParams(-1,dp(148)); outputLp.topMargin=dp(8); commandCard.addView(outputView,outputLp);
         content.addView(commandCard);
 
-        content.addView(sectionTitle("الحزم والمكتبات"));
-        LinearLayout pkgCard = card();
-        addAction(pkgCard, "مدير حزم Termux (pkg)", "بحث، تثبيت، تحديث وترقية أدوات النظام", () -> showPackageMenu());
-        addAction(pkgCard, "مكتبات Python (pip)", "تثبيت مكتبات Python أو تشغيل pip", () -> showInstallDialog("Python / pip", "python -m pip install", "اسم المكتبة أو الحزمة"));
-        addAction(pkgCard, "مكتبات Node.js (npm)", "تثبيت حزم JavaScript داخل مجلد المشروع", () -> showInstallDialog("Node.js / npm", "npm install", "اسم الحزمة أو المكتبة"));
-        addAction(pkgCard, "أدوات Rust (cargo)", "تثبيت أداة Rust أو مكتبة من crates.io", () -> showInstallDialog("Rust / Cargo", "cargo install", "اسم الأداة"));
-        addAction(pkgCard, "أدوات Ruby (gem)", "تثبيت Gems", () -> showInstallDialog("Ruby / gem", "gem install", "اسم الحزمة"));
-        addAction(pkgCard, "أدوات Go", "تثبيت أداة Go عبر go install", () -> showInstallDialog("Go", "go install", "اسم الحزمة الكامل مثل example.com/tool@latest"));
-        addAction(pkgCard, "حزم pnpm / yarn / bun", "إدارة مكتبات JavaScript باستخدام مدير الحزم المثبت", () -> showInstallDialog("Node.js packages", "npm install", "اسم المكتبة"));
-        addAction(pkgCard, "Lua / luarocks", "تثبيت مكتبة Lua إذا كانت luarocks مثبتة", () -> showInstallDialog("LuaRocks", "luarocks install", "اسم المكتبة"));
-        addAction(pkgCard, "PHP / Composer", "تثبيت مكتبة PHP داخل المشروع إذا كان Composer متاحًا", () -> showInstallDialog("Composer", "composer require", "vendor/package"));
-        addAction(pkgCard, "تنزيل ملف من رابط HTTPS", "تنزيل ملفات أو أرشيفات مباشرة إلى مسار تختاره", () -> showDownloadDialog());
-        content.addView(pkgCard);
+        content.addView(sectionTitle("الأدوات حسب المهمة"));
+        LinearLayout tools=card();
+        addAction(tools,"مدير الحزم","بحث، تثبيت، تحديث وفحص حزم Termux",()->showPackageMenu());
+        addAction(tools,"مكتبات ولغات البرمجة","pip وnpm وcargo وgem وGo وComposer وLuaRocks",()->showLibrariesMenu());
+        addAction(tools,"فحص وتشخيص النظام","المعمارية والذاكرة والتخزين والمترجمات المثبتة",()->showDiagnosticsMenu());
+        addAction(tools,"ملفات ومشاريع","تنزيل HTTPS، ضغط وفك الأرشيفات وفتح Shell بالمجلد",()->showProjectToolsMenu());
+        content.addView(tools);
+        TextView warning=text("التنفيذ ما يمنح root ولا يتجاوز عزل أندرويد. الأوامر التي تحذف ملفات أو تثبّت كود قد تغيّر بيئة Termux بالكامل.",11,MUTED,false);
+        warning.setPadding(dp(3),dp(12),dp(3),dp(5)); content.addView(warning);
+    }
 
-        content.addView(sectionTitle("اللغات والتشخيص"));
-        LinearLayout runtimes = card();
-        addAction(runtimes, "فحص اللغات والمترجمات", "يعرض الموجود فعليًا في Termux بدل افتراض أن كل لغة مثبتة", () -> setCommandAndRun(runtimeCheck(), "~/", "فحص لغات وأدوات Termux"));
-        addAction(runtimes, "ملخص النظام والتخزين", "إصدار Termux، معمارية الجهاز، مساحة التخزين والذاكرة", () -> setCommandAndRun(systemCheck(), "~/", "تشخيص Termux"));
-        addAction(runtimes, "قائمة الحزم المثبتة", "يعرض قائمة حزم Termux المثبتة", () -> setCommandAndRun("pkg list-installed", "~/", "الحزم المثبتة"));
-        addAction(runtimes, "تحديث مستودعات الحزم", "يشغّل pkg update داخل جلسة Termux تفاعلية", () -> confirmAndRun("pkg update", "~/", "تحديث مستودعات Termux"));
-        addAction(runtimes, "ترقية الحزم", "تحديث الحزم مع قبول التأكيد الافتراضي (-y)", () -> confirmAndRun("pkg upgrade -y", "~/", "ترقية حزم Termux"));
-        content.addView(runtimes);
+    private void showLibrariesMenu(){
+        String[] items={"Python / pip","Node.js / npm","Rust / Cargo","Ruby / gem","Go install","LuaRocks","PHP Composer"};
+        new AlertDialog.Builder(this).setTitle("مكتبات ولغات البرمجة").setItems(items,(d,w)->{
+            if(w==0)showInstallDialog("Python / pip","python -m pip install","اسم المكتبة");
+            else if(w==1)showInstallDialog("Node.js / npm","npm install","اسم الحزمة");
+            else if(w==2)showInstallDialog("Rust / Cargo","cargo install","اسم الأداة");
+            else if(w==3)showInstallDialog("Ruby / gem","gem install","اسم الحزمة");
+            else if(w==4)showInstallDialog("Go","go install","اسم الحزمة الكامل مثل example.com/tool@latest");
+            else if(w==5)showInstallDialog("LuaRocks","luarocks install","اسم المكتبة");
+            else showInstallDialog("PHP / Composer","composer require","vendor/package");
+        }).show();
+    }
 
-        content.addView(sectionTitle("ملفات ومشاريع"));
-        LinearLayout projectCard = card();
-        addAction(projectCard, "ضغط مجلد بصيغة tar.gz", "يطلب مسار المصدر واسم الأرشيف", () -> showArchiveDialog());
-        addAction(projectCard, "فك أرشيف tar.gz أو zip", "يفك الملفات داخل مجلد تحدده", () -> showExtractDialog());
-        addAction(projectCard, "تنزيل ملف من الإنترنت", "يدعم HTTPS ويعرض النتيجة هنا", () -> showDownloadDialog());
-        addAction(projectCard, "فتح جلسة Shell في المجلد", "يفتح Termux على مسار العمل المحدد", () -> confirmAndRun("exec bash -l", workdirInput.getText().toString(), "جلسة Shell من مدير الملفات"));
-        content.addView(projectCard);
+    private void showDiagnosticsMenu(){
+        String[] items={"فحص اللغات والمترجمات","ملخص النظام والتخزين","الحزم المثبتة","تحديث فهرس الحزم","ترقية الحزم"};
+        new AlertDialog.Builder(this).setTitle("فحص وتشخيص").setItems(items,(d,w)->{
+            if(w==0)setCommandAndRun(runtimeCheck(),"~/","فحص لغات وأدوات Termux");
+            else if(w==1)setCommandAndRun(systemCheck(),"~/","تشخيص Termux");
+            else if(w==2)setCommandAndRun("pkg list-installed","~/","الحزم المثبتة");
+            else if(w==3)confirmAndRun("pkg update","~/","تحديث فهرس الحزم");
+            else confirmAndRun("pkg upgrade -y","~/","ترقية حزم Termux");
+        }).show();
+    }
 
-        TextView warning = text("تنبيه أمان: أوامر Shell والمثبتات تستطيع تعديل ملفاتك وتنزيل وتشغيل كود. راجع الأمر قبل التنفيذ؛ لا يمنح التطبيق صلاحيات root.", 11, MUTED, false);
-        warning.setGravity(Gravity.TOP | Gravity.START);
-        warning.setPadding(dp(4), dp(14), dp(4), dp(8));
-        content.addView(warning);
+    private void showProjectToolsMenu(){
+        String[] items={"تنزيل ملف من HTTPS","ضغط مجلد tar.gz","فك أرشيف zip أو tar.gz","فتح جلسة Shell"};
+        new AlertDialog.Builder(this).setTitle("ملفات ومشاريع").setItems(items,(d,w)->{
+            if(w==0)showDownloadDialog();
+            else if(w==1)showArchiveDialog();
+            else if(w==2)showExtractDialog();
+            else confirmAndRun("exec bash -l",workdirInput.getText().toString(),"جلسة Shell من مركز الأدوات");
+        }).show();
     }
 
     private void showPackageMenu() {

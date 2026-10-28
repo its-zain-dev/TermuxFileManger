@@ -96,6 +96,30 @@ Configure a separate API provider, model, HTTPS endpoint, and key as needed:
 </tr>
 </table>
 
+## User interface
+
+The whole app is built in code (no XML layouts) on top of one shared design system, so every screen speaks the same visual language.
+
+**File manager**
+
+- A large header shows the current folder, the full path, and a live connection pill (`● متصل بـ Termux`).
+- Breadcrumb chips walk the folder tree (`~ / projects / app`), with quick-access chips for home, `PREFIX`, storage and downloads.
+- Inline search filters as you type (debounced, so it does not spam the Termux bridge).
+- Sort by name, size, date or type, and switch between a comfortable list and a two-column grid.
+- Every entry is a card with an icon tile, its name, size, permission bits and last-modified time.
+- A floating `+` button creates a folder or file, and long-press (or the row menu) opens a themed action sheet.
+
+**AI assistant and agent console**
+
+- The header carries the chat identity, provider, model, linked Termux session and an auto-execution switch, plus a live status pill.
+- Each agent run is rendered as one step timeline: thinking summary, tool call with the exact command, tool output, and the final answer — every step expandable.
+- Agent tool approval shows the risk level, the working directory and the command in a code block before anything runs.
+- Starting panels offer ready-made prompts, and code blocks can be copied or executed in Termux with one tap.
+
+**Everywhere**
+
+- Bottom sheets replace plain list dialogs, cards replace default text dialogs, and all tappable surfaces share the same ripple feedback and typography.
+
 ## AI coding assistant
 
 TFM's AI assistant is designed for practical work with Termux projects, not just general chat.

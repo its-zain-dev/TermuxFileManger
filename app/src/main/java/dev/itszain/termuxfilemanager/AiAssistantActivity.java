@@ -23,6 +23,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
+import android.widget.HorizontalScrollView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
@@ -46,7 +47,8 @@ import java.util.regex.Pattern;
 /** Multi-chat AI coding assistant linked to saved Termux work sessions. */
 public class AiAssistantActivity extends Activity {
     private UiTheme theme; private String lastThemeName="midnight"; private int BG,PANEL,PANEL2,TEXT,MUTED,ACCENT,DANGER,DIVIDER;
-    private JSONArray chats,sessions; private String activeChatId="",attachedImage=""; private Spinner chatsSpinner,providerSpinner,terminalSpinner; private TextView modelLabel,rateLabel,attachmentLabel; private LinearLayout messagesBox; private ScrollView messagesScroll; private EditText input; private Button sendButton; private boolean receiverRegistered=false; private boolean busy=false; private boolean updatingSpinners=false;
+    private UiKit kit;
+    private JSONArray chats,sessions; private String activeChatId="",attachedImage=""; private Spinner chatsSpinner,providerSpinner,terminalSpinner; private TextView modelLabel,rateLabel,attachmentLabel; private TextView chatTitle,chatSubtitle; private TextView providerChip,sessionChip,autoChip; private LinearLayout agentStatusHolder; private LinearLayout messagesBox; private ScrollView messagesScroll; private EditText input; private Button sendButton; private boolean receiverRegistered=false; private boolean busy=false; private boolean updatingSpinners=false;
     private final ExecutorService worker=Executors.newFixedThreadPool(3); private final Handler handler=new Handler(Looper.getMainLooper()); private final Map<Integer,String> commandChats=new HashMap<>(); private final Map<Integer,Boolean> agentCommandRequests=new HashMap<>(); private final Map<Integer,PopupCommand> popupCommands=new HashMap<>(); private final Map<Integer,Runnable> workspaceSyncCallbacks=new HashMap<>(); private final Map<String,Boolean> cancelledAgentRuns=new HashMap<>(); private final Map<String,Integer> noProgressContinuations=new HashMap<>(); private final Map<String,StreamViews> activeStreams=new HashMap<>(); private boolean autoScreenshotUsed=false;
     private static final class StreamViews {
         final TextView answer, thinking; final Button toggle; final View thinkingBody;
@@ -87,23 +89,22 @@ public class AiAssistantActivity extends Activity {
     };
     @Override public void onCreate(Bundle b){super.onCreate(b);initTheme();UiTheme.applyWindow(this);getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);chats=AiSecureStore.loadArray(this,AiSecureStore.CHATS,"items");sessions=AiSecureStore.loadArray(this,AiSecureStore.SESSIONS,"items");activeChatId=AiSecureStore.settings(this).getString("active_ai_chat","");if(chats.length()==0)newChat(false);if(findChat(activeChatId)==null)activeChatId=chats.optJSONObject(0).optString("id");build();IntentFilter f=new IntentFilter(CommandResultService.ACTION_RESULT);IntentFilter sf=new IntentFilter(ScreenCaptureService.ACTION_SCREENSHOT_SAVED);if(Build.VERSION.SDK_INT>=33){registerReceiver(resultReceiver,f,Context.RECEIVER_NOT_EXPORTED);registerReceiver(screenshotReceiver,sf,Context.RECEIVER_NOT_EXPORTED);}else{registerReceiver(resultReceiver,f);registerReceiver(screenshotReceiver,sf);}receiverRegistered=true;syncAgentWorkspace(() -> { });}
     @Override protected void onDestroy(){if(receiverRegistered){try{unregisterReceiver(resultReceiver);}catch(Exception ignored){}try{unregisterReceiver(screenshotReceiver);}catch(Exception ignored){}}worker.shutdownNow();super.onDestroy();}
-    private void initTheme(){lastThemeName=UiTheme.getName(this);theme=UiTheme.get(this);BG=theme.bg;PANEL=theme.panel;PANEL2=theme.panel2;TEXT=theme.text;MUTED=theme.muted;ACCENT=theme.accent;DANGER=theme.danger;DIVIDER=theme.divider;}
+    private void initTheme(){lastThemeName=UiTheme.getName(this);theme=UiTheme.get(this);kit=new UiKit(this);BG=theme.bg;PANEL=theme.panel;PANEL2=theme.panel2;TEXT=theme.text;MUTED=theme.muted;ACCENT=theme.accent;DANGER=theme.danger;DIVIDER=theme.divider;}
     private JSONObject current(){return findChat(activeChatId);} private JSONObject findChat(String id){return AiSecureStore.findById(chats,id);}
     private JSONObject msg(String role,String text){JSONObject o=new JSONObject();try{o.put("role",role);o.put("text",text);o.put("time",System.currentTimeMillis());}catch(Exception ignored){}return o;}
     private void newChat(boolean rebuild){String id=Long.toString(System.nanoTime());JSONObject c=new JSONObject();try{c.put("id",id);c.put("name","دردشة "+(chats.length()+1));c.put("provider",AiSecureStore.getActiveProvider(this));c.put("sessionId",AiSecureStore.settings(this).getString("active_terminal_session",""));c.put("messages",new JSONArray());chats.put(c);activeChatId=id;saveChats();if(rebuild)rebuildChatSpinner();}catch(Exception ignored){}}
     private void saveChats(){AiSecureStore.saveArray(this,AiSecureStore.CHATS,"items",chats);AiSecureStore.settings(this).edit().putString("active_ai_chat",activeChatId).apply();}
     private void build() {
         FrameLayout frame = new FrameLayout(this);
-        frame.setBackgroundColor(BG);
+        frame.setBackgroundColor(kit.bg);
         setContentView(frame);
 
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(10), dp(5), dp(10), dp(6));
-        root.setBackgroundColor(BG);
-        frame.addView(root, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        LinearLayout column = new LinearLayout(this);
+        column.setOrientation(LinearLayout.VERTICAL);
+        column.setBackgroundColor(kit.bg);
+        frame.addView(column, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-        // These spinners are retained as state holders; their pickers are opened from the floating menu.
+        // These spinners are retained as state holders; their pickers are opened from the header chips.
         chatsSpinner = new Spinner(this);
         chatsSpinner.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, chatNames()));
         providerSpinner = new Spinner(this);
@@ -112,8 +113,8 @@ public class AiAssistantActivity extends Activity {
         providerSpinner.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, providerNames));
         terminalSpinner = new Spinner(this);
         terminalSpinner.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, terminalNames()));
-        modelLabel = text("Model", 10, MUTED, false);
-        rateLabel = text("جاهز", 10, MUTED, false);
+        modelLabel = kit.text("Model", 10, kit.muted, false);
+        rateLabel = kit.text("جاهز", 10.5f, kit.muted, false);
         chatsSpinner.setSelection(indexOfChat(activeChatId));
 
         chatsSpinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
@@ -147,40 +148,151 @@ public class AiAssistantActivity extends Activity {
             }
         });
 
+        buildAgentHeader(column);
+        buildMessages(column);
+        buildComposer(column);
+
+        updateHeader();
+        renderMessages();
+    }
+
+    /** Header: chat identity, live status, and the controls that shape the agent run. */
+    private void buildAgentHeader(LinearLayout parent) {
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.VERTICAL);
+        header.setPadding(kit.dp(14), kit.dp(12), kit.dp(12), kit.dp(8));
+        header.setBackground(kit.round(kit.panel, 0, kit.outline));
+
+        LinearLayout titleRow = new LinearLayout(this);
+        titleRow.setOrientation(LinearLayout.HORIZONTAL);
+        titleRow.setGravity(Gravity.CENTER_VERTICAL);
+
+        LinearLayout titles = new LinearLayout(this);
+        titles.setOrientation(LinearLayout.VERTICAL);
+        chatTitle = kit.text("دردشة", 19, kit.text, true);
+        titles.addView(chatTitle, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        chatSubtitle = kit.caption("");
+        LinearLayout.LayoutParams subtitleLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        subtitleLp.topMargin = kit.dp(3);
+        titles.addView(chatSubtitle, subtitleLp);
+        titleRow.addView(titles, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+
+        Button newChat = kit.iconButton("✚", "دردشة جديدة");
+        newChat.setTextSize(17);
+        newChat.setOnClickListener(v -> {
+            newChat(true);
+            updateHeader();
+            renderMessages();
+        });
+        titleRow.addView(newChat, new LinearLayout.LayoutParams(kit.dp(36), kit.dp(36)));
+
+        Button menu = kit.iconButton("⋮", "خيارات الوكيل");
+        menu.setOnClickListener(v -> showAgentMenu());
+        LinearLayout.LayoutParams menuLp = new LinearLayout.LayoutParams(kit.dp(36), kit.dp(36));
+        menuLp.leftMargin = kit.dp(6);
+        titleRow.addView(menu, menuLp);
+        header.addView(titleRow);
+
+        LinearLayout statusRow = new LinearLayout(this);
+        statusRow.setOrientation(LinearLayout.HORIZONTAL);
+        statusRow.setGravity(Gravity.CENTER_VERTICAL);
+        statusRow.setPadding(0, kit.dp(8), 0, 0);
+        agentStatusHolder = new LinearLayout(this);
+        statusRow.addView(agentStatusHolder, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        rateLabel.setPadding(kit.dp(10), 0, 0, 0);
+        statusRow.addView(rateLabel, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        header.addView(statusRow);
+
+        HorizontalScrollView chipScroll = new HorizontalScrollView(this);
+        chipScroll.setHorizontalScrollBarEnabled(false);
+        chipScroll.setPadding(0, kit.dp(8), 0, 0);
+        LinearLayout chipRow = new LinearLayout(this);
+        chipRow.setOrientation(LinearLayout.HORIZONTAL);
+        chipRow.setGravity(Gravity.CENTER_VERTICAL);
+
+        providerChip = kit.chip("المزوّد", false);
+        providerChip.setOnClickListener(v -> chooseProviderForChat());
+        chipRow.addView(providerChip, chipLp());
+
+        sessionChip = kit.chip("الجلسة", false);
+        sessionChip.setOnClickListener(v -> chooseTerminalSessionForChat());
+        chipRow.addView(sessionChip, chipLp());
+
+        autoChip = kit.chip("تنفيذ تلقائي", false);
+        autoChip.setOnClickListener(v -> toggleChatAutoExecution());
+        chipRow.addView(autoChip, chipLp());
+
+        chipScroll.addView(chipRow);
+        header.addView(chipScroll);
+
+        View line = kit.divider();
+        LinearLayout.LayoutParams lineLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, kit.dp(1));
+        lineLp.topMargin = kit.dp(10);
+        header.addView(line, lineLp);
+        parent.addView(header);
+    }
+
+    private LinearLayout.LayoutParams chipLp() {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, kit.dp(30));
+        lp.rightMargin = kit.dp(8);
+        return lp;
+    }
+
+    private void buildMessages(LinearLayout parent) {
         messagesScroll = new ScrollView(this);
         messagesScroll.setFillViewport(true);
         messagesScroll.setClipToPadding(false);
-        messagesScroll.setPadding(0, dp(54), 0, 0);
         messagesBox = new LinearLayout(this);
         messagesBox.setOrientation(LinearLayout.VERTICAL);
-        messagesBox.setPadding(dp(2), dp(2), dp(2), dp(8));
+        messagesBox.setPadding(kit.dp(12), kit.dp(6), kit.dp(12), kit.dp(14));
         messagesScroll.addView(messagesBox);
-        root.addView(messagesScroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
+        parent.addView(messagesScroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
+    }
 
-        attachmentLabel = text("ماكو صورة مرفقة", 10, MUTED, false);
-        attachmentLabel.setPadding(dp(3), dp(2), dp(3), dp(2));
+    private void buildComposer(LinearLayout parent) {
+        LinearLayout composerWrap = new LinearLayout(this);
+        composerWrap.setOrientation(LinearLayout.VERTICAL);
+        composerWrap.setPadding(kit.dp(10), kit.dp(6), kit.dp(10), kit.dp(10));
+        composerWrap.setBackground(kit.round(kit.panel, 20, kit.outline));
+
+        attachmentLabel = kit.caption("ماكو صورة مرفقة");
+        attachmentLabel.setPadding(kit.dp(6), kit.dp(2), kit.dp(6), kit.dp(4));
         attachmentLabel.setVisibility(View.GONE);
-        root.addView(attachmentLabel, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        composerWrap.addView(attachmentLabel, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         LinearLayout composer = new LinearLayout(this);
-        composer.setGravity(Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+        composer.setOrientation(LinearLayout.HORIZONTAL);
+        composer.setGravity(Gravity.BOTTOM | Gravity.CENTER_VERTICAL);
+
+        Button attach = kit.iconButton("＋", "إرفاق لقطة شاشة");
+        attach.setTextSize(17);
+        attach.setOnClickListener(v -> captureOrAttach());
+        composer.addView(attach, new LinearLayout.LayoutParams(kit.dp(40), kit.dp(44)));
+
         input = new EditText(this);
-        input.setTextColor(TEXT); input.setHintTextColor(MUTED); input.setTextSize(14);
+        input.setTextColor(kit.text);
+        input.setHintTextColor(kit.muted);
+        input.setTextSize(13.5f);
         input.setGravity(Gravity.TOP | Gravity.START);
         input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
-        input.setMinLines(1); input.setMaxLines(4); input.setMaxHeight(dp(104));
+        input.setMinLines(1);
+        input.setMaxLines(4);
+        input.setMaxHeight(kit.dp(104));
         input.setHint("اكتب هدفك…");
-        input.setPadding(dp(12), dp(8), dp(12), dp(8));
-        input.setBackground(round(PANEL2, 16, DIVIDER));
+        input.setPadding(kit.dp(12), kit.dp(10), kit.dp(12), kit.dp(10));
+        input.setBackground(kit.round(kit.panelAlt, 16, kit.outline));
         LinearLayout.LayoutParams inputLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1);
-        inputLp.rightMargin = dp(6);
+        inputLp.rightMargin = kit.dp(8);
         composer.addView(input, inputLp);
 
-        Button send = button("↑", ACCENT, BG);
-        send.setTextSize(24);
+        Button send = kit.primary("↑");
+        send.setTextSize(21);
         send.setContentDescription("إرسال إلى الوكيل");
-        composer.addView(send, new LinearLayout.LayoutParams(dp(48), dp(48)));
-        root.addView(composer, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        LinearLayout.LayoutParams sendLp = new LinearLayout.LayoutParams(kit.dp(48), kit.dp(46));
+        composer.addView(send, sendLp);
+        composerWrap.addView(composer);
+        parent.addView(composerWrap);
+
         sendButton = send;
         send.setOnClickListener(v -> sendCurrent());
         input.setOnEditorActionListener((v, actionId, event) -> {
@@ -188,19 +300,6 @@ public class AiAssistantActivity extends Activity {
             if (event != null && event.getKeyCode() == android.view.KeyEvent.KEYCODE_ENTER && event.getAction() == android.view.KeyEvent.ACTION_UP) { sendCurrent(); return true; }
             return false;
         });
-
-        Button menu = button("⋮", PANEL2, TEXT);
-        menu.setTextSize(23);
-        menu.setElevation(dp(8));
-        menu.setBackground(round(PANEL2, 25, DIVIDER));
-        menu.setContentDescription("خيارات الوكيل");
-        FrameLayout.LayoutParams menuLp = new FrameLayout.LayoutParams(dp(48), dp(48), Gravity.TOP | Gravity.RIGHT);
-        menuLp.setMargins(0, dp(10), dp(10), 0);
-        frame.addView(menu, menuLp);
-        menu.setOnClickListener(v -> showAgentMenu());
-
-        updateHeader();
-        renderMessages();
     }
 
     private void updateHeader() {
@@ -210,11 +309,30 @@ public class AiAssistantActivity extends Activity {
         updatingSpinners = true;
         if (providerSpinner != null && providerSpinner.getSelectedItemPosition() != providerIndex) providerSpinner.setSelection(providerIndex);
         AiProvider p = AiProvider.byId(provider);
-        if (modelLabel != null) modelLabel.setText("Model: " + AiSecureStore.getModel(this, p.id));
-        if (rateLabel != null) rateLabel.setText("متبقي اليوم: " + AiSecureStore.remainingRequests(this, p.id) + " طلب · حدود محلية");
         int sessionIndex = indexOfSession(c.optString("sessionId", ""));
         if (terminalSpinner != null && terminalSpinner.getSelectedItemPosition() != sessionIndex) terminalSpinner.setSelection(Math.max(0, sessionIndex));
         updatingSpinners = false;
+
+        if (chatTitle != null) chatTitle.setText(c.optString("name", "دردشة"));
+        if (chatSubtitle != null) chatSubtitle.setText(p.name + " · " + AiSecureStore.getModel(this, p.id));
+        if (providerChip != null) providerChip.setText(p.name);
+        JSONObject session = AiSecureStore.findById(sessions, c.optString("sessionId", ""));
+        if (sessionChip != null) sessionChip.setText(session == null ? "بدون جلسة" : session.optString("name", "Terminal"));
+        if (autoChip != null) {
+            boolean auto = autoExecutionEnabled(c.optString("id", ""));
+            autoChip.setText(auto ? "تنفيذ تلقائي: مفعّل" : "تنفيذ تلقائي: مغلق");
+            autoChip.setTextColor(auto ? kit.accent : kit.muted);
+        }
+        if (modelLabel != null) modelLabel.setText("Model: " + AiSecureStore.getModel(this, p.id));
+        if (rateLabel != null && !busy) rateLabel.setText("متبقي اليوم: " + AiSecureStore.remainingRequests(this, p.id) + " طلب · حدود محلية");
+        updateStatusPill();
+    }
+
+    /** Live status pill in the header: ready vs. agent working. */
+    private void updateStatusPill() {
+        if (agentStatusHolder == null) return;
+        agentStatusHolder.removeAllViews();
+        agentStatusHolder.addView(kit.statusPill(busy ? "الوكيل يعمل" : "جاهز", busy));
     }
     private void renderMessages() {
         if (messagesBox == null) return;
@@ -224,10 +342,8 @@ public class AiAssistantActivity extends Activity {
         if (chat == null) return;
         JSONArray all = chat.optJSONArray("messages");
         if (all == null || all.length() == 0) {
-            TextView welcome = text("المساعد جاهز. كل أدوات الوكيل والتفكير ومخرجاتها راح تنعرض بفقاعة عمل واحدة. الأوامر تبقى خاضعة لإعدادات الموافقة.", 13, MUTED, false);
-            welcome.setPadding(dp(12), dp(12), dp(12), dp(12));
-            welcome.setBackground(round(PANEL, 12, DIVIDER));
-            messagesBox.addView(welcome, match());
+            LinearLayout welcome = buildWelcomeCard();
+            messagesBox.addView(welcome, kit.match());
             return;
         }
         int i = 0;
@@ -252,6 +368,39 @@ public class AiAssistantActivity extends Activity {
         messagesScroll.post(() -> messagesScroll.fullScroll(View.FOCUS_DOWN));
     }
 
+    /** First-run panel: explains the agent in two lines and offers ready-made starting points. */
+    private LinearLayout buildWelcomeCard() {
+        LinearLayout card = kit.card();
+        TextView head = kit.text("ابدأ بمهمة", 16, kit.text, true);
+        card.addView(head, kit.matchNoMargin());
+        TextView sub = kit.caption("اكتب هدفك بالعربي، والوكيل يفحص الملفات ويقترح أدوات. كل أمر يحتاج موافقتك، إلا إذا فعّلت التنفيذ التلقائي من الشريحة فوق.");
+        sub.setPadding(0, kit.dp(6), 0, kit.dp(12));
+        card.addView(sub, kit.matchNoMargin());
+        String[] suggestions = {
+                "افحص ملفات المشروع وحدد المشاكل",
+                "اشرح لي هذا الكود خطوة بخطوة",
+                "شغّل اختبارات المشروع وحلّل النتيجة"
+        };
+        for (String suggestion : suggestions) {
+            LinearLayout row = kit.row();
+            TextView label = kit.text(suggestion, 13, kit.text, false);
+            row.addView(label, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+            TextView arrow = kit.text("›", 18, kit.accent, false);
+            arrow.setGravity(Gravity.CENTER);
+            row.addView(arrow, new LinearLayout.LayoutParams(kit.dp(24), ViewGroup.LayoutParams.WRAP_CONTENT));
+            row.setOnClickListener(v -> {
+                if (input != null) {
+                    input.setText(suggestion);
+                    input.requestFocus();
+                }
+            });
+            LinearLayout.LayoutParams rowLp = kit.match();
+            rowLp.bottomMargin = kit.dp(4);
+            card.addView(row, rowLp);
+        }
+        return card;
+    }
+
     private boolean isVisibleUserPrompt(JSONObject message) {
         if (message == null || !"user".equals(message.optString("role", ""))) return false;
         String value = message.optString("text", "").trim();
@@ -263,69 +412,111 @@ public class AiAssistantActivity extends Activity {
         if ("agent_control".equals(role)) return;
         boolean assistant = "assistant".equals(role), terminal = "terminal".equals(role), toolOutput = "tool_output".equals(role);
         if (toolOutput) { addToolOutputCard(m); return; }
+
         LinearLayout bubble = new LinearLayout(this);
         bubble.setOrientation(LinearLayout.VERTICAL);
-        bubble.setPadding(dp(11), dp(9), dp(11), dp(9));
-        bubble.setBackground(round(assistant ? PANEL2 : (terminal ? Color.rgb(27,34,42) : PANEL), 13, assistant ? ACCENT : DIVIDER));
-        TextView label = text(assistant ? AiProvider.byId(providerFor(chatId)).name : (terminal ? "TERMUX" : "أنت"), 10, assistant ? ACCENT : MUTED, true);
-        bubble.addView(label, match());
+        bubble.setPadding(kit.dp(13), kit.dp(10), kit.dp(13), kit.dp(11));
+        int bubbleColor = assistant ? kit.panel : (terminal ? kit.panelAlt : kit.accentSoft);
+        int bubbleStroke = assistant ? kit.outline : Color.TRANSPARENT;
+        bubble.setBackground(kit.round(bubbleColor, 18, bubbleStroke));
+
+        TextView label = kit.text(assistant ? AiProvider.byId(providerFor(chatId)).name : (terminal ? "TERMUX" : "أنت"),
+                10.5f, assistant ? kit.accent : kit.muted, true);
+        bubble.addView(label, kit.wrap());
+
         String thoughtText = m.optString("thinking", "");
         if (assistant && !m.optBoolean("streaming", false) && !thoughtText.trim().isEmpty()) addThinkingCard(bubble, thoughtText);
+
         String streamId = m.optString("stream_id", "");
         if (assistant && m.optBoolean("streaming", false) && !streamId.isEmpty()) {
-            Button toggle = button(thoughtText.isEmpty() ? "تفكير الموديل جارٍ…" : "ملخص التفكير · " + thoughtText.length() + " حرف", PANEL, ACCENT);
-            LinearLayout thoughtBody = new LinearLayout(this); thoughtBody.setOrientation(LinearLayout.VERTICAL); thoughtBody.setPadding(dp(8),dp(7),dp(8),dp(7)); thoughtBody.setBackground(round(BG,8,DIVIDER));
-            TextView thoughtView = text(thoughtText.isEmpty() ? "بانتظار ملخص التفكير من المزوّد…" : thoughtText, 11, MUTED, false); thoughtView.setGravity(Gravity.TOP|Gravity.START); thoughtView.setTextIsSelectable(true); thoughtBody.addView(thoughtView,match()); thoughtBody.setVisibility(View.GONE);
-            toggle.setOnClickListener(v->{boolean show=thoughtBody.getVisibility()!=View.VISIBLE;thoughtBody.setVisibility(show?View.VISIBLE:View.GONE);}); bubble.addView(toggle,match()); bubble.addView(thoughtBody,match());
-            TextView liveAnswer=text(txt.isEmpty()?"جارٍ توليد الرد…":txt,13,TEXT,false); liveAnswer.setGravity(Gravity.TOP|Gravity.START); liveAnswer.setTextIsSelectable(true); bubble.addView(liveAnswer,match());
-            activeStreams.put(streamId,new StreamViews(liveAnswer,thoughtView,toggle,thoughtBody));
+            Button toggle = kit.button(thoughtText.isEmpty() ? "التفكير جارٍ…" : ("ملخص التفكير · " + thoughtText.length() + " حرف"),
+                    kit.panelAlt, kit.accent);
+            toggle.setTextSize(11);
+            toggle.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+            LinearLayout thoughtBody = new LinearLayout(this);
+            thoughtBody.setOrientation(LinearLayout.VERTICAL);
+            thoughtBody.setPadding(kit.dp(9), kit.dp(7), kit.dp(9), kit.dp(7));
+            thoughtBody.setBackground(kit.round(kit.bg, 10, kit.outline));
+            TextView thoughtView = kit.text(thoughtText.isEmpty() ? "بانتظار ملخص التفكير من المزوّد…" : thoughtText, 11, kit.muted, false);
+            thoughtView.setGravity(Gravity.TOP | Gravity.START);
+            thoughtView.setTextIsSelectable(true);
+            thoughtBody.addView(thoughtView, kit.matchNoMargin());
+            thoughtBody.setVisibility(View.GONE);
+            toggle.setOnClickListener(v -> {
+                boolean show = thoughtBody.getVisibility() != View.VISIBLE;
+                thoughtBody.setVisibility(show ? View.VISIBLE : View.GONE);
+            });
+            bubble.addView(toggle, kit.wrap());
+            bubble.addView(thoughtBody, kit.wrap());
+
+            TextView liveAnswer = kit.text(txt.isEmpty() ? "جارٍ توليد الرد…" : txt, 13.5f, kit.text, false);
+            liveAnswer.setGravity(Gravity.TOP | Gravity.START);
+            liveAnswer.setTextIsSelectable(true);
+            bubble.addView(liveAnswer, kit.wrap());
+            activeStreams.put(streamId, new StreamViews(liveAnswer, thoughtView, toggle, thoughtBody));
         } else {
-        JSONObject action = assistant ? extractAgentAction(txt) : null;
-        if (action != null && isSkillActivation(action)) {
-            String skillName=action.optString("skill",action.optString("name","skill"));
-            bubble.addView(text("يتحقق من المهارة /"+skillName+" ويحمّل تعليماتها…",12,ACCENT,true),match());
-        } else if (action != null) {
-            String tool = action.optString("tool", action.optString("name", "run_shell"));
-            String reason = action.optString("reason", "الوكيل يحتاج أداة حتى يكمل المهمة.");
-            boolean skillInstall = "install_skill".equals(tool);
-            String display = skillInstall ? action.optString("url", action.optString("source", "")) : agentCommand(action);
-            TextView description = text(reason, 13, TEXT, false);
-            description.setPadding(0, dp(4), 0, dp(5));
-            bubble.addView(description, match());
-            TextView code = text(skillInstall ? ("Skill URL: " + display) : ("$ " + display), 12, TEXT, false);
-            code.setTypeface(Typeface.MONOSPACE);
-            code.setTextIsSelectable(true);
-            code.setPadding(dp(9), dp(9), dp(9), dp(9));
-            code.setBackground(round(BG, 9, DIVIDER));
-            bubble.addView(code, match());
-            Button run = button(skillInstall ? "تنصيب المهارة" : "مراجعة وتشغيل الأداة", ACCENT, BG);
-            run.setOnClickListener(v -> confirmAgentAction(chatId, action));
-            bubble.addView(run, match());
-            if (!skillInstall) {
-                Button copy = button("نسخ الأمر", PANEL, TEXT);
-                copy.setOnClickListener(v -> copyText("AI command", display));
-                bubble.addView(copy, match());
+            JSONObject action = assistant ? extractAgentAction(txt) : null;
+            if (action != null && isSkillActivation(action)) {
+                String skillName = action.optString("skill", action.optString("name", "skill"));
+                bubble.addView(kit.text("يتحقق من المهارة /" + skillName + " ويحمّل تعليماتها…", 12.5f, kit.accent, true), kit.wrap());
+            } else if (action != null) {
+                String tool = action.optString("tool", action.optString("name", "run_shell"));
+                String reason = action.optString("reason", "الوكيل يحتاج أداة حتى يكمل المهمة.");
+                boolean skillInstall = "install_skill".equals(tool);
+                String display = skillInstall ? action.optString("url", action.optString("source", "")) : agentCommand(action);
+                TextView description = kit.text(reason, 13, kit.text, false);
+                description.setPadding(0, kit.dp(4), 0, kit.dp(6));
+                bubble.addView(description, kit.wrap());
+                TextView code = kit.mono(skillInstall ? ("Skill URL: " + display) : ("$ " + display), 12, kit.text);
+                code.setPadding(kit.dp(10), kit.dp(9), kit.dp(10), kit.dp(9));
+                code.setBackground(kit.round(kit.bg, 10, kit.outline));
+                bubble.addView(code, kit.wrap());
+                Button run = kit.primary(skillInstall ? "تنصيب المهارة" : "مراجعة وتشغيل الأداة");
+                run.setOnClickListener(v -> confirmAgentAction(chatId, action));
+                bubble.addView(run, kit.wrap());
+                if (!skillInstall) {
+                    Button copy = kit.ghost("نسخ الأمر");
+                    copy.setOnClickListener(v -> copyText("AI command", display));
+                    bubble.addView(copy, kit.wrap());
+                }
+            } else {
+                addMarkdownContent(bubble, txt, chatId);
             }
-        } else {
-            addMarkdownContent(bubble, txt, chatId);
         }
-        }
-        LinearLayout.LayoutParams p = match();
-        p.topMargin = dp(5);
-        p.width = ViewGroup.LayoutParams.MATCH_PARENT;
+        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        p.topMargin = kit.dp(4);
+        p.bottomMargin = kit.dp(4);
         p.gravity = assistant ? Gravity.START : Gravity.END;
         messagesBox.addView(bubble, p);
     }
 
-    /** One compact assistant bubble contains every turn, thought, tool invocation and result until the next user prompt. */
+    /**
+     * One compact card holds a whole agent run: thinking, tool calls, tool output and
+     * the final answer. Every step is a row in a readable timeline.
+     */
     private void addAgentRunBubble(String chatId, JSONArray events) {
-        LinearLayout bubble = new LinearLayout(this);
-        bubble.setOrientation(LinearLayout.VERTICAL);
-        bubble.setPadding(dp(11), dp(8), dp(11), dp(8));
-        bubble.setBackground(round(PANEL2, 13, ACCENT));
-        TextView title = text("AI Agent · " + AiProvider.byId(providerFor(chatId)).name, 10, ACCENT, true);
-        bubble.addView(title, compactParams());
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(kit.dp(13), kit.dp(11), kit.dp(13), kit.dp(12));
+        card.setBackground(kit.round(kit.panel, 20, kit.outline));
 
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        TextView badge = kit.text("✦", 13, kit.accent, true);
+        badge.setGravity(Gravity.CENTER);
+        badge.setBackground(kit.round(kit.accentSoft, 14));
+        header.addView(badge, new LinearLayout.LayoutParams(kit.dp(26), kit.dp(26)));
+        TextView title = kit.text("AI Agent · " + AiProvider.byId(providerFor(chatId)).name, 12.5f, kit.text, true);
+        LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1);
+        titleLp.leftMargin = kit.dp(8);
+        header.addView(title, titleLp);
+        TextView steps = kit.text(events.length() + " خطوة", 10.5f, kit.muted, false);
+        header.addView(steps);
+        card.addView(header, kit.matchNoMargin());
+        addCompactDivider(card);
+
+        int step = 0;
         for (int i = 0; i < events.length(); i++) {
             JSONObject event = events.optJSONObject(i);
             if (event == null) continue;
@@ -333,15 +524,18 @@ public class AiAssistantActivity extends Activity {
             if ("agent_control".equals(role)) continue;
 
             if ("tool_output".equals(role)) {
+                step++;
                 String label = event.optString("tool_label", "Tool output");
                 String raw = event.optString("text", "");
-                addAgentExpandableRow(bubble, "TOOL output · " + compactToolLabel(label),
-                        raw.length() + " chars · اضغط لعرض المخرجات", raw, null, chatId, false);
+                addTimelineRow(card, "▤", "مخرجات الأداة · " + compactToolLabel(label),
+                        raw.length() + " حرف · اضغط لعرض المخرجات", raw, null, chatId, false, step);
                 continue;
             }
             if ("user".equals(role) && event.optString("text", "").trim().startsWith("[نتيجة أداة")) {
+                step++;
                 String raw = event.optString("text", "");
-                addAgentExpandableRow(bubble, "TOOL output · install_skill", raw.length() + " chars · اضغط للتفاصيل", raw, null, chatId, false);
+                addTimelineRow(card, "▤", "نتيجة أداة · install_skill",
+                        raw.length() + " حرف · اضغط للتفاصيل", raw, null, chatId, false, step);
                 continue;
             }
             if (!"assistant".equals(role)) continue;
@@ -354,46 +548,48 @@ public class AiAssistantActivity extends Activity {
             if (action == null) action = extractAgentAction(rawText);
 
             if (streaming) {
-                Button thoughtToggle = button(thought.isEmpty() ? "Thinking · بانتظار ملخص التفكير" : "Thinking · " + thought.length() + " chars", BG, MUTED);
+                step++;
+                Button thoughtToggle = kit.button(thought.isEmpty() ? "التفكير جارٍ…" : ("Thinking · " + thought.length() + " chars"),
+                        kit.panelAlt, kit.muted);
                 thoughtToggle.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
                 thoughtToggle.setTextSize(11);
                 thoughtToggle.setVisibility(thought.isEmpty() ? View.GONE : View.VISIBLE);
                 LinearLayout thoughtBody = new LinearLayout(this);
                 thoughtBody.setOrientation(LinearLayout.VERTICAL);
-                thoughtBody.setPadding(dp(8), dp(5), dp(8), dp(5));
-                thoughtBody.setBackground(round(BG, 8, DIVIDER));
-                TextView thoughtView = text(thought.isEmpty() ? "" : thought, 11, MUTED, false);
+                thoughtBody.setPadding(kit.dp(9), kit.dp(6), kit.dp(9), kit.dp(6));
+                thoughtBody.setBackground(kit.round(kit.bg, 10, kit.outline));
+                TextView thoughtView = kit.text(thought.isEmpty() ? "" : thought, 11, kit.muted, false);
                 thoughtView.setGravity(Gravity.TOP | Gravity.START);
                 thoughtView.setTextIsSelectable(true);
-                thoughtBody.addView(thoughtView, compactParams());
+                thoughtBody.addView(thoughtView, kit.matchNoMargin());
                 thoughtBody.setVisibility(View.GONE);
                 thoughtToggle.setOnClickListener(v -> {
                     boolean show = thoughtBody.getVisibility() != View.VISIBLE;
                     thoughtBody.setVisibility(show ? View.VISIBLE : View.GONE);
                 });
-                bubble.addView(thoughtToggle, compactParams());
-                bubble.addView(thoughtBody, compactParams());
-                addCompactDivider(bubble);
+                card.addView(thoughtToggle, kit.matchNoMargin());
+                card.addView(thoughtBody, kit.matchNoMargin());
 
                 boolean looksLikeToolJson = looksLikeAgentActionPayload(rawText);
-                TextView liveAnswer = text(rawText.isEmpty() ? "" : (looksLikeToolJson ? "جاري تجهيز استدعاء الأداة…" : rawText), 13, TEXT, false);
+                TextView liveAnswer = kit.text(rawText.isEmpty() ? "" : (looksLikeToolJson ? "جاري تجهيز استدعاء الأداة…" : rawText), 13.5f, kit.text, false);
                 liveAnswer.setGravity(Gravity.TOP | Gravity.START);
                 liveAnswer.setTextIsSelectable(true);
                 liveAnswer.setVisibility(rawText.isEmpty() || looksLikeToolJson ? View.GONE : View.VISIBLE);
-                bubble.addView(liveAnswer, compactParams());
+                card.addView(liveAnswer, kit.matchNoMargin());
                 activeStreams.put(streamId, new StreamViews(liveAnswer, thoughtView, thoughtToggle, thoughtBody));
                 continue;
             }
 
             if (thought != null && !thought.trim().isEmpty()) {
-                addAgentExpandableRow(bubble, "Thinking · " + thought.length() + " chars",
-                        "اضغط لعرض ملخص التفكير", thought, null, chatId, false);
+                step++;
+                addTimelineRow(card, "✳", "التفكير · " + thought.length() + " حرف",
+                        "اضغط لعرض ملخص التفكير", thought, null, chatId, false, step);
             }
 
             if (action != null) {
                 String tool = action.optString("tool", action.optString("name", ""));
                 if ("finish".equals(tool) || "continue".equals(tool)) {
-                    if (!rawText.trim().isEmpty()) addMarkdownContent(bubble, rawText, chatId);
+                    if (!rawText.trim().isEmpty()) addMarkdownContent(card, rawText, chatId);
                     continue;
                 }
                 JSONObject pairedOutput = null;
@@ -404,68 +600,88 @@ public class AiAssistantActivity extends Activity {
                         pairedOutput = next;
                     }
                 }
+                step++;
                 String details = describeAgentTool(action);
                 if (pairedOutput != null) {
                     details += "\n\n--- TOOL OUTPUT ---\n" + pairedOutput.optString("text", "");
                     i++;
                 }
-                addAgentExpandableRow(bubble, "TOOL called · " + compactToolLabel(tool),
+                addTimelineRow(card, "⚙", "استدعاء أداة · " + compactToolLabel(tool),
                         pairedOutput == null ? "اضغط لعرض الأداة والإجراء" : "الأداة والمخرجات · اضغط للتفاصيل",
-                        details, action, chatId, pairedOutput != null);
+                        details, action, chatId, pairedOutput != null, step);
                 continue;
             }
 
-            if (!rawText.trim().isEmpty()) addMarkdownContent(bubble, rawText, chatId);
+            if (!rawText.trim().isEmpty()) addMarkdownContent(card, rawText, chatId);
         }
-        LinearLayout.LayoutParams lp = match();
-        lp.topMargin = dp(5);
-        lp.width = ViewGroup.LayoutParams.MATCH_PARENT;
-        lp.gravity = Gravity.START;
-        messagesBox.addView(bubble, lp);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = kit.dp(6);
+        lp.bottomMargin = kit.dp(4);
+        messagesBox.addView(card, lp);
     }
 
-    private void addAgentExpandableRow(LinearLayout parent, String heading, String summary, String details,
-                                       JSONObject action, String chatId, boolean alreadyExecuted) {
-        Button row = button("›  " + heading, PANEL, ACCENT);
+    /**
+     * A single timeline row: icon badge, title, summary and an expandable detail box.
+     * Tool rows can also offer the run / copy actions directly.
+     */
+    private void addTimelineRow(LinearLayout parent, String glyph, String heading, String summary, String details,
+                                JSONObject action, String chatId, boolean alreadyExecuted, int step) {
+        LinearLayout wrapper = new LinearLayout(this);
+        wrapper.setOrientation(LinearLayout.HORIZONTAL);
+        wrapper.setGravity(Gravity.TOP);
+
+        TextView badge = kit.text(glyph, 11, kit.accent, true);
+        badge.setGravity(Gravity.CENTER);
+        badge.setBackground(kit.round(kit.accentSoft, 12));
+        LinearLayout.LayoutParams badgeLp = new LinearLayout.LayoutParams(kit.dp(24), kit.dp(24));
+        wrapper.addView(badge, badgeLp);
+
+        LinearLayout body = new LinearLayout(this);
+        body.setOrientation(LinearLayout.VERTICAL);
+        body.setPadding(kit.dp(9), 0, 0, kit.dp(6));
+
+        Button row = kit.button("›  " + heading, kit.panelAlt, kit.accent);
         row.setContentDescription(summary);
         row.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
-        row.setTextSize(11);
-        row.setMinHeight(dp(34));
-        row.setPadding(dp(7), dp(3), dp(7), dp(3));
-        parent.addView(row, compactParams());
+        row.setTextSize(11.5f);
+        row.setMinHeight(kit.dp(32));
+        row.setPadding(kit.dp(8), kit.dp(4), kit.dp(8), kit.dp(4));
+        body.addView(row, kit.matchNoMargin());
 
         LinearLayout detailBox = new LinearLayout(this);
         detailBox.setOrientation(LinearLayout.VERTICAL);
-        detailBox.setPadding(dp(8), dp(6), dp(8), dp(6));
-        detailBox.setBackground(round(BG, 8, DIVIDER));
-        TextView content = text(details == null ? "" : details, 11, TEXT, false);
+        detailBox.setPadding(kit.dp(9), kit.dp(7), kit.dp(9), kit.dp(7));
+        detailBox.setBackground(kit.round(kit.bg, 10, kit.outline));
+        TextView content = kit.mono(details == null ? "" : details, 11, kit.text);
         content.setGravity(Gravity.TOP | Gravity.START);
         content.setTextIsSelectable(true);
-        content.setTypeface(Typeface.MONOSPACE);
-        detailBox.addView(content, compactParams());
+        detailBox.addView(content, kit.matchNoMargin());
 
         if (action != null && !alreadyExecuted) {
             String tool = action.optString("tool", action.optString("name", ""));
             if (!"finish".equals(tool) && !"continue".equals(tool)
                     && !autoExecutionEnabled(chatId) && isRunnableAgentAction(action)) {
-                Button run = button("مراجعة وتشغيل الأداة", ACCENT, BG);
+                Button run = kit.primary("مراجعة وتشغيل الأداة");
                 run.setOnClickListener(v -> confirmAgentAction(chatId, action));
-                detailBox.addView(run, compactParams());
+                detailBox.addView(run, kit.matchNoMargin());
                 String command = agentCommand(action);
                 if (!command.trim().isEmpty()) {
-                    Button copy = button("نسخ الأمر", PANEL, TEXT);
+                    Button copy = kit.ghost("نسخ الأمر");
                     copy.setOnClickListener(v -> copyText("AI command", command));
-                    detailBox.addView(copy, compactParams());
+                    detailBox.addView(copy, kit.matchNoMargin());
                 }
             }
         }
         detailBox.setVisibility(View.GONE);
-        parent.addView(detailBox, compactParams());
+        body.addView(detailBox, kit.matchNoMargin());
+        wrapper.addView(body, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+
         row.setOnClickListener(v -> {
             boolean show = detailBox.getVisibility() != View.VISIBLE;
             detailBox.setVisibility(show ? View.VISIBLE : View.GONE);
             row.setText((show ? "⌄  " : "›  ") + heading);
         });
+        parent.addView(wrapper, kit.match());
         addCompactDivider(parent);
     }
 
@@ -520,26 +736,65 @@ public class AiAssistantActivity extends Activity {
     }
 
     private void addToolOutputCard(JSONObject item) {
-        String raw=item.optString("text","");
-        LinearLayout card=new LinearLayout(this); card.setOrientation(LinearLayout.VERTICAL); card.setPadding(dp(10),dp(7),dp(10),dp(7)); card.setBackground(round(PANEL,10,DIVIDER));
-        String path=item.optString("display_path","");
-        TextView heading=text(path.isEmpty()?"Tool output · Termux":"Reading "+path,11,ACCENT,true); card.addView(heading,match());
-        TextView preview=text(raw.length()>160?raw.substring(0,160)+"…":"Output received · "+raw.length()+" chars",11,MUTED,false); card.addView(preview,match());
-        TextView details=text(raw,11,TEXT,false); details.setTypeface(Typeface.MONOSPACE); details.setTextIsSelectable(true); details.setGravity(Gravity.TOP|Gravity.START); details.setPadding(dp(7),dp(7),dp(7),dp(7)); details.setBackground(round(BG,8,DIVIDER)); details.setVisibility(View.GONE);
-        ScrollView sc=new ScrollView(this); sc.addView(details); card.addView(sc,new LinearLayout.LayoutParams(-1,dp(180)));
-        Button toggle=button("عرض المخرجات الخام",PANEL2,ACCENT); toggle.setOnClickListener(v->{boolean show=details.getVisibility()!=View.VISIBLE;details.setVisibility(show?View.VISIBLE:View.GONE);toggle.setText(show?"إخفاء المخرجات":"عرض المخرجات الخام");preview.setVisibility(show?View.GONE:View.VISIBLE);}); card.addView(toggle,match());
-        LinearLayout.LayoutParams lp=match();lp.topMargin=dp(4);messagesBox.addView(card,lp);
+        String raw = item.optString("text", "");
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(kit.dp(12), kit.dp(10), kit.dp(12), kit.dp(10));
+        card.setBackground(kit.round(kit.panel, 18, kit.outline));
+
+        String path = item.optString("display_path", "");
+        TextView heading = kit.text(path.isEmpty() ? "مخرجات الأداة · Termux" : "قراءة " + path, 11.5f, kit.accent, true);
+        card.addView(heading, kit.matchNoMargin());
+
+        TextView preview = kit.text(raw.length() > 160 ? raw.substring(0, 160) + "…" : "وصلت المخرجات · " + raw.length() + " حرف",
+                11, kit.muted, false);
+        card.addView(preview, kit.matchNoMargin());
+
+        TextView details = kit.mono(raw, 11, kit.text);
+        details.setGravity(Gravity.TOP | Gravity.START);
+        details.setTextIsSelectable(true);
+        details.setPadding(kit.dp(9), kit.dp(8), kit.dp(9), kit.dp(8));
+        details.setBackground(kit.round(kit.bg, 10, kit.outline));
+        details.setVisibility(View.GONE);
+        ScrollView scroller = new ScrollView(this);
+        scroller.addView(details);
+        card.addView(scroller, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, kit.dp(170)));
+
+        Button toggle = kit.ghost("عرض المخرجات الخام");
+        toggle.setOnClickListener(v -> {
+            boolean show = details.getVisibility() != View.VISIBLE;
+            details.setVisibility(show ? View.VISIBLE : View.GONE);
+            toggle.setText(show ? "إخفاء المخرجات" : "عرض المخرجات الخام");
+            preview.setVisibility(show ? View.GONE : View.VISIBLE);
+        });
+        card.addView(toggle, kit.matchNoMargin());
+
+        LinearLayout.LayoutParams lp = kit.match();
+        lp.topMargin = kit.dp(4);
+        messagesBox.addView(card, lp);
     }
 
     private String extractReadingPath(JSONObject chat) {
         try { JSONArray a=chat.optJSONArray("messages"); if(a!=null&&a.length()>0){String last=a.optJSONObject(a.length()-1).optString("text","");java.util.regex.Matcher m=java.util.regex.Pattern.compile("(?i)(?:cat|read|reading)\\s+([~/][^\\s;&|]+)").matcher(last);if(m.find())return m.group(1);} } catch(Exception ignored){} return "";
     }
 
-    private void addThinkingCard(LinearLayout bubble,String thought) {
-        Button toggle=button("ملخص التفكير · "+thought.length()+" حرف",PANEL,ACCENT);
-        TextView body=text(thought,11,MUTED,false);body.setTypeface(Typeface.MONOSPACE);body.setGravity(Gravity.TOP|Gravity.START);body.setTextIsSelectable(true);body.setPadding(dp(8),dp(7),dp(8),dp(7));body.setBackground(round(BG,8,DIVIDER));body.setVisibility(View.GONE);
-        toggle.setOnClickListener(v->{boolean show=body.getVisibility()!=View.VISIBLE;body.setVisibility(show?View.VISIBLE:View.GONE);toggle.setText(show?"إخفاء ملخص التفكير":"ملخص التفكير · "+thought.length()+" حرف");});
-        bubble.addView(toggle,match());bubble.addView(body,match());
+    private void addThinkingCard(LinearLayout bubble, String thought) {
+        Button toggle = kit.button("ملخص التفكير · " + thought.length() + " حرف", kit.panelAlt, kit.accent);
+        toggle.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        toggle.setTextSize(11);
+        TextView body = kit.mono(thought, 11, kit.muted);
+        body.setGravity(Gravity.TOP | Gravity.START);
+        body.setTextIsSelectable(true);
+        body.setPadding(kit.dp(9), kit.dp(7), kit.dp(9), kit.dp(7));
+        body.setBackground(kit.round(kit.bg, 10, kit.outline));
+        body.setVisibility(View.GONE);
+        toggle.setOnClickListener(v -> {
+            boolean show = body.getVisibility() != View.VISIBLE;
+            body.setVisibility(show ? View.VISIBLE : View.GONE);
+            toggle.setText(show ? "إخفاء ملخص التفكير" : "ملخص التفكير · " + thought.length() + " حرف");
+        });
+        bubble.addView(toggle, kit.wrap());
+        bubble.addView(body, kit.wrap());
     }
 
     private void addMarkdownContent(LinearLayout target,String source,String chatId){
@@ -567,27 +822,46 @@ public class AiAssistantActivity extends Activity {
             line=line.replaceAll("`([^`]+)`","$1");
             TextView row=text(line,heading?15:13,TEXT,heading);
             row.setGravity(Gravity.TOP|Gravity.START); row.setTextIsSelectable(true);
-            LinearLayout.LayoutParams lp=match(); lp.topMargin=dp(1); lp.bottomMargin=dp(3); target.addView(row,lp);
+            LinearLayout.LayoutParams lp=kit.wrap(); lp.topMargin=dp(1); lp.bottomMargin=dp(3); target.addView(row,lp);
         }
     }
 
-    private void addCodeCard(LinearLayout target,String language,String code,String chatId){
-        if(code==null||code.trim().isEmpty())return;
-        LinearLayout card=new LinearLayout(this); card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(dp(9),dp(8),dp(9),dp(8)); card.setBackground(round(BG,10,DIVIDER));
-        String lang=language==null?"":language.trim().toLowerCase();
-        card.addView(text(lang.isEmpty()?"CODE":("CODE · "+lang),10,ACCENT,true),match());
-        TextView body=text(code,12,TEXT,false); body.setTypeface(Typeface.MONOSPACE); body.setTextIsSelectable(true);
-        body.setGravity(Gravity.TOP|Gravity.START); LinearLayout.LayoutParams bodyLp=match(); bodyLp.topMargin=dp(4); card.addView(body,bodyLp);
-        LinearLayout actions=new LinearLayout(this); actions.setGravity(Gravity.END|Gravity.CENTER_VERTICAL);
-        Button copy=button("نسخ",PANEL,TEXT); copy.setOnClickListener(v->copyText("Code",code));
-        actions.addView(copy,new LinearLayout.LayoutParams(dp(72),dp(36)));
-        if(lang.isEmpty()||lang.equals("bash")||lang.equals("sh")||lang.equals("shell")||lang.equals("termux")||lang.equals("zsh")){
-            Button run=button("تشغيل في Termux",PANEL2,ACCENT); LinearLayout.LayoutParams runLp=new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,dp(36)); runLp.leftMargin=dp(6);
-            run.setOnClickListener(v->confirmSuggestedCommand(chatId,code)); actions.addView(run,runLp);
+    private void addCodeCard(LinearLayout target, String language, String code, String chatId) {
+        if (code == null || code.trim().isEmpty()) return;
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(kit.dp(11), kit.dp(9), kit.dp(11), kit.dp(9));
+        card.setBackground(kit.round(kit.bg, 12, kit.outline));
+        String lang = language == null ? "" : language.trim().toLowerCase();
+        TextView header = kit.text(lang.isEmpty() ? "CODE" : ("CODE · " + lang), 10, kit.accent, true);
+        header.setLetterSpacing(0.06f);
+        card.addView(header, kit.wrap());
+        TextView body = kit.mono(code, 12, kit.text);
+        body.setGravity(Gravity.TOP | Gravity.START);
+        body.setTextIsSelectable(true);
+        LinearLayout.LayoutParams bodyLp = kit.wrap();
+        bodyLp.topMargin = kit.dp(5);
+        card.addView(body, bodyLp);
+        LinearLayout actions = new LinearLayout(this);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        actions.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+        Button copy = kit.ghost("نسخ");
+        copy.setOnClickListener(v -> copyText("Code", code));
+        LinearLayout.LayoutParams copyLp = new LinearLayout.LayoutParams(kit.dp(74), kit.dp(36));
+        actions.addView(copy, copyLp);
+        if (lang.isEmpty() || lang.equals("bash") || lang.equals("sh") || lang.equals("shell") || lang.equals("termux") || lang.equals("zsh")) {
+            Button run = kit.primary("تشغيل في Termux");
+            run.setOnClickListener(v -> confirmSuggestedCommand(chatId, code));
+            LinearLayout.LayoutParams runLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, kit.dp(36));
+            runLp.leftMargin = kit.dp(8);
+            actions.addView(run, runLp);
         }
-        LinearLayout.LayoutParams aLp=match(); aLp.topMargin=dp(6); card.addView(actions,aLp);
-        LinearLayout.LayoutParams p=match(); p.topMargin=dp(4); target.addView(card,p);
+        LinearLayout.LayoutParams aLp = kit.wrap();
+        aLp.topMargin = kit.dp(8);
+        card.addView(actions, aLp);
+        LinearLayout.LayoutParams p = kit.wrap();
+        p.topMargin = kit.dp(4);
+        target.addView(card, p);
     }
 
     private void copyText(String label,String value){
@@ -678,13 +952,58 @@ public class AiAssistantActivity extends Activity {
         String fallback = session == null ? "~/" : session.optString("workdir", "~/");
         JSONObject args = action.optJSONObject("arguments");
         String workdir = action.optString("workdir", args == null ? fallback : args.optString("workdir", fallback));
-        String message = reason + "\n\n" + (installSkill ? "رابط المهارة: " : "مستوى المخاطرة: " + risk + "\nمجلد التشغيل: " + workdir + "\n\n")
-                + command + (installSkill ? "\n\nسيتم تنزيل تعليمات SKILL.md وحفظها محليًا، ولن يُشغّل أي كود من المهارة أثناء التثبيت." : "\n\nسيُنفذ الأمر داخل Termux بصلاحيات المستخدم الحالية.");
-        new AlertDialog.Builder(this).setTitle(installSkill ? "تثبيت Agent Skill" : "موافقة على أداة الوكيل")
-                .setMessage(message)
-                .setPositiveButton(installSkill ? "تنصيب" : "موافقة وتشغيل", (d, w) -> executeAgentAction(chatId, action, false))
-                .setNeutralButton(installSkill ? "نسخ الرابط" : "نسخ الأمر", (d, w) -> copyText(installSkill ? "Skill URL" : "AI command", command))
-                .setNegativeButton("إلغاء", null).show();
+        final android.app.Dialog dialog = new android.app.Dialog(this);
+        LinearLayout card = kit.dialogCard(installSkill ? "تثبيت Agent Skill" : "موافقة على أداة الوكيل", null);
+
+        TextView reasonView = kit.text(reason, 13, kit.text, false);
+        reasonView.setGravity(Gravity.TOP | Gravity.START);
+        reasonView.setLineSpacing(kit.dp(2), 1f);
+        card.addView(reasonView, kit.matchNoMargin());
+
+        LinearLayout facts = new LinearLayout(this);
+        facts.setOrientation(LinearLayout.VERTICAL);
+        facts.setPadding(0, kit.dp(10), 0, kit.dp(4));
+        facts.addView(kit.caption(installSkill ? "رابط المهارة" : "مستوى المخاطرة: " + risk), kit.matchNoMargin());
+        facts.addView(kit.caption("مجلد التشغيل: " + workdir), kit.matchNoMargin());
+        card.addView(facts, kit.matchNoMargin());
+
+        TextView commandView = kit.mono(command, 12, kit.text);
+        commandView.setGravity(Gravity.TOP | Gravity.START);
+        commandView.setTextIsSelectable(true);
+        commandView.setPadding(kit.dp(11), kit.dp(9), kit.dp(11), kit.dp(9));
+        commandView.setBackground(kit.round(kit.bg, 12, kit.outline));
+        card.addView(commandView, kit.matchNoMargin());
+
+        TextView footnote = kit.caption(installSkill
+                ? "سيتم تنزيل تعليمات SKILL.md وحفظها محليًا، ولن يُشغّل أي كود من المهارة أثناء التثبيت."
+                : "سيُنفذ الأمر داخل Termux بصلاحيات المستخدم الحالية.");
+        footnote.setPadding(0, kit.dp(8), 0, 0);
+        card.addView(footnote, kit.matchNoMargin());
+
+        LinearLayout actions = new LinearLayout(this);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        actions.setGravity(Gravity.CENTER_VERTICAL);
+        Button cancel = kit.ghost("إلغاء");
+        cancel.setOnClickListener(v -> dialog.dismiss());
+        actions.addView(cancel, new LinearLayout.LayoutParams(0, kit.dp(44), 1));
+        Button copy = kit.ghost(installSkill ? "نسخ الرابط" : "نسخ الأمر");
+        copy.setOnClickListener(v -> copyText(installSkill ? "Skill URL" : "AI command", command));
+        LinearLayout.LayoutParams copyLp = new LinearLayout.LayoutParams(0, kit.dp(44), 1);
+        copyLp.leftMargin = kit.dp(8);
+        actions.addView(copy, copyLp);
+        Button approve = kit.primary(installSkill ? "تنصيب" : "موافقة وتشغيل");
+        approve.setOnClickListener(v -> {
+            dialog.dismiss();
+            executeAgentAction(chatId, action, false);
+        });
+        LinearLayout.LayoutParams approveLp = new LinearLayout.LayoutParams(0, kit.dp(44), 1.4f);
+        approveLp.leftMargin = kit.dp(8);
+        actions.addView(approve, approveLp);
+        LinearLayout.LayoutParams actionsLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        actionsLp.topMargin = kit.dp(14);
+        card.addView(actions, actionsLp);
+
+        kit.showCard(dialog, card);
     }
 
     private boolean autoExecutionEnabled() {
@@ -700,17 +1019,18 @@ public class AiAssistantActivity extends Activity {
     private void toggleChatAutoExecution() {
         JSONObject chat = current(); if (chat == null) return;
         boolean enabled = !autoExecutionEnabled(chat.optString("id", ""));
-        new AlertDialog.Builder(this).setTitle("التنفيذ التلقائي لهذه الدردشة")
-                .setMessage(enabled
-                        ? "سيشغّل الوكيل أدوات Shell تلقائيًا في هذه الدردشة من دون تأكيد لكل أمر. الأوامر شديدة التدمير تبقى محجوبة. لا تفعّل هذا إلا إذا كنت تثق بالمهمة." 
-                        : "ستعود هذه الدردشة إلى طلب موافقتك قبل تشغيل أدوات Shell.")
-                .setPositiveButton(enabled ? "تفعيل" : "تعطيل", (d, w) -> {
+        kit.confirmDialog("التنفيذ التلقائي لهذه الدردشة",
+                enabled
+                        ? "سيشغّل الوكيل أدوات Shell تلقائيًا في هذه الدردشة من دون تأكيد لكل أمر. الأوامر شديدة التدمير تبقى محجوبة. لا تفعّل هذا إلا إذا كنت تثق بالمهمة."
+                        : "ستعود هذه الدردشة إلى طلب موافقتك قبل تشغيل أدوات Shell.",
+                enabled ? "تفعيل" : "تعطيل", () -> {
                     try { chat.put("agent_auto_execute", enabled); saveChats(); }
                     catch (Exception ignored) { }
                     AgentWorkspace.persistChatOverride(this, chat.optString("id"), chat.optString("provider", "gemini"), chat.optString("sessionId", ""), Boolean.valueOf(enabled));
                     Toast.makeText(this, enabled ? "التنفيذ التلقائي مفعّل لهذه الدردشة" : "التنفيذ التلقائي متوقف لهذه الدردشة", Toast.LENGTH_LONG).show();
+                    updateHeader();
                     renderMessages();
-                }).setNegativeButton("إلغاء", null).show();
+                });
     }
 
     private void executeAgentAction(String chatId, JSONObject action, boolean automatic) {
@@ -736,7 +1056,7 @@ public class AiAssistantActivity extends Activity {
                 saveChats();
                 if (chatId.equals(activeChatId)) renderMessages();
                 if (sendButton != null) sendButton.setEnabled(true);
-                busy = false;
+                busy = false; updateStatusPill();
                 return;
             }
             noProgressContinuations.put(chatId, stagnant + 1);
@@ -882,12 +1202,12 @@ public class AiAssistantActivity extends Activity {
         final String requestText = enriched;
         final String imagePath = image;
         final String streamId = appendStreamingAssistant(chat);
-        busy = true; sendButton.setEnabled(false);
+        busy = true; updateStatusPill(); sendButton.setEnabled(false);
         if (rateLabel != null) rateLabel.setText("يفكّر الموديل ويرسل الرد تدريجيًا…");
 
         syncAgentWorkspace(() -> {
             JSONObject liveChat = findChat(chatId);
-            if (liveChat == null) { busy = false; if (sendButton != null) sendButton.setEnabled(true); return; }
+            if (liveChat == null) { busy = false; updateStatusPill(); if (sendButton != null) sendButton.setEnabled(true); return; }
             String providerId = liveChat.optString("provider", AiSecureStore.getActiveProvider(this));
             String model = AiSecureStore.getModel(this, providerId);
             String endpoint = AiSecureStore.getEndpoint(this, providerId);
@@ -946,7 +1266,7 @@ public class AiAssistantActivity extends Activity {
                     visible = normalizeAgentActionForDisplay(visible, next);
                     finishStreamingAssistant(chatId, streamId, visible);
                     boolean requestedScreenshot = result.contains("[TFM_SCREENSHOT]") || result.contains("[REQUEST_SCREENSHOT]");
-                    busy = false; if (sendButton != null) sendButton.setEnabled(true); updateHeader();
+                    busy = false; updateStatusPill(); if (sendButton != null) sendButton.setEnabled(true); updateHeader();
                     if (requestedScreenshot && !autoScreenshotUsed) { autoScreenshotUsed = true; beginAgentScreenshotCapture(chatId, finalProviderId, finalModel, finalEndpoint); return; }
                     if (isAgentRunCancelled(chatId)) return;
                     if (thinkingOnly) { queueAgentContinuation(chatId, true); return; }
@@ -1024,9 +1344,9 @@ public class AiAssistantActivity extends Activity {
     private void appendChatMessage(JSONObject c,String role,String text){try{JSONArray a=c.optJSONArray("messages");if(a==null)a=new JSONArray();a.put(msg(role,text));while(a.length()>80){JSONArray n=new JSONArray();for(int i=1;i<a.length();i++)n.put(a.opt(i));a=n;}c.put("messages",a);}catch(Exception ignored){}}
     private JSONArray apiHistory(JSONObject c){JSONArray src=c.optJSONArray("messages"),out=new JSONArray();if(src==null)return out;int start=Math.max(0,src.length()-32);for(int i=start;i<src.length();i++){JSONObject m=src.optJSONObject(i);if(m==null)continue;String role=m.optString("role","user");if("agent_control".equals(role))role="user";if("terminal".equals(role))role="user";if("tool_output".equals(role)){String raw=m.optString("text","");if(raw.length()>16000)raw=raw.substring(raw.length()-16000);out.put(msg("user","[RAW TOOL OUTPUT — "+m.optString("tool_label","Tool result")+"]\n"+raw+"\n[END TOOL OUTPUT]"));continue;}if(!"assistant".equals(role)&&!"user".equals(role))continue;String historyText=("user".equals(role)&&m.has("expanded_prompt"))?m.optString("expanded_prompt",m.optString("text","")):m.optString("text","");out.put(msg(role,historyText));}return out;}
     private String withTerminalContext(String userText,String sid){JSONObject s=AiSecureStore.findById(sessions,sid);if(s==null)return userText;String out=s.optString("output","");if(out.isEmpty())return userText;out=out.length()>10000?out.substring(out.length()-10000):out;return userText+"\n\n[Terminal session: "+s.optString("name","Terminal")+"; workdir="+s.optString("workdir","~/")+"]\n[Recent terminal output]\n"+out+"\n[حلّل المخرجات عند صلتها بالسؤال، ولا تفترض أن آخر أمر نجح ما لم تظهر النتيجة].";}
-    private void broadcastPrompt(){String prompt=input.getText().toString().trim();if(prompt.isEmpty())return;if(busy){Toast.makeText(this,"انتظر حتى ينتهي الطلب الحالي",Toast.LENGTH_SHORT).show();return;}new AlertDialog.Builder(this).setTitle("إرسال الأمر إلى كل الدردشات").setMessage("سيُرسل نفس النص إلى كل دردشة محفوظة لها مفتاح API متاح. قد يستهلك ذلك طلبًا من كل مزوّد. عدد الدردشات: "+chats.length()+". متابعة؟\n\n"+prompt).setPositiveButton("إرسال للجميع",(d,w)->doBroadcast(prompt)).setNegativeButton("إلغاء",null).show();}
-    private void doBroadcast(String prompt){input.setText("");JSONArray snapshot=AiSecureStore.cloneArray(chats);String active=activeChatId;busy=true;sendButton.setEnabled(false);rateLabel.setText("إرسال متتابع إلى الدردشات…");worker.execute(()->{List<String> summaries=new ArrayList<>();for(int i=0;i<snapshot.length();i++){JSONObject c=snapshot.optJSONObject(i);if(c==null)continue;String pid=c.optString("provider",AiSecureStore.getActiveProvider(this)),chatId=c.optString("id");try{String key=AiSecureStore.getKey(this,pid);if(key.isEmpty()){summaries.add(c.optString("name")+": تخطّيت لعدم وجود مفتاح");continue;}appendChatMessage(c,"user",prompt);String model=AiSecureStore.getModel(this,pid),endpoint=AiSecureStore.getEndpoint(this,pid);JSONArray history=apiHistory(c);String sid=c.optString("sessionId","");if(history.length()>0)history.put(history.length()-1,new JSONObject().put("role","user").put("text",withTerminalContext(prompt,sid)));String answer=AiApiClient.send(this,AiProvider.byId(pid),model,endpoint,key,history,"",2048);appendChatMessage(c,"assistant",answer);summaries.add(c.optString("name")+": وصل رد");int gap=AiSecureStore.settings(this).getInt("rate_gap_seconds",3);if(gap>0)Thread.sleep(gap*1000L);}catch(Exception e){appendChatMessage(c,"assistant","[خطأ أثناء البث]\n"+e.getMessage());summaries.add(c.optString("name")+": "+e.getMessage());}saveChats();}runOnUiThread(()->{busy=false;sendButton.setEnabled(true);rebuildChatSpinner();activeChatId=active;chatsSpinner.setSelection(indexOfChat(activeChatId));updateHeader();renderMessages();new AlertDialog.Builder(this).setTitle("نتيجة الإرسال الجماعي").setMessage(android.text.TextUtils.join("\n",summaries)).setPositiveButton("حسنًا",null).show();});});}
-    private void confirmSuggestedCommand(String chatId,String code){JSONObject c=findChat(chatId);if(c==null)return;String sid=c.optString("sessionId","");JSONObject s=AiSecureStore.findById(sessions,sid);String wd=s==null?"~/":s.optString("workdir","~/");new AlertDialog.Builder(this).setTitle("تأكيد أمر اقترحه AI").setMessage("راجع الأمر بالكامل قبل تشغيله داخل Termux. أي أمر shell قد يعدّل ملفاتك أو يثبت حزمًا.\n\nمجلد التشغيل: "+wd+"\n\n"+code).setPositiveButton("تنفيذ داخل Termux",(d,w)->{try{int id=TermuxCommandRunner.run(this,code,wd,"AI approved command",true);commandChats.put(id,chatId);Toast.makeText(this,"تم إرسال الأمر إلى Termux؛ ستُضاف المخرجات إلى الدردشة",Toast.LENGTH_LONG).show();}catch(Exception e){alert(e.getMessage());}}).setNeutralButton("نسخ الأمر",(d,w)->{ClipboardManager cm=(ClipboardManager)getSystemService(CLIPBOARD_SERVICE);cm.setPrimaryClip(ClipData.newPlainText("AI command",code));}).setNegativeButton("إلغاء",null).show();}
+    private void broadcastPrompt(){String prompt=input.getText().toString().trim();if(prompt.isEmpty())return;if(busy){Toast.makeText(this,"انتظر حتى ينتهي الطلب الحالي",Toast.LENGTH_SHORT).show();return;}kit.confirmDialog("إرسال الأمر إلى كل الدردشات","سيُرسل نفس النص إلى كل دردشة محفوظة لها مفتاح API متاح. قد يستهلك ذلك طلبًا من كل مزوّد. عدد الدردشات: "+chats.length()+". متابعة؟\n\n"+prompt,"إرسال للجميع",()->doBroadcast(prompt));}
+    private void doBroadcast(String prompt){input.setText("");JSONArray snapshot=AiSecureStore.cloneArray(chats);String active=activeChatId;busy = true; updateStatusPill();sendButton.setEnabled(false);rateLabel.setText("إرسال متتابع إلى الدردشات…");worker.execute(()->{List<String> summaries=new ArrayList<>();for(int i=0;i<snapshot.length();i++){JSONObject c=snapshot.optJSONObject(i);if(c==null)continue;String pid=c.optString("provider",AiSecureStore.getActiveProvider(this)),chatId=c.optString("id");try{String key=AiSecureStore.getKey(this,pid);if(key.isEmpty()){summaries.add(c.optString("name")+": تخطّيت لعدم وجود مفتاح");continue;}appendChatMessage(c,"user",prompt);String model=AiSecureStore.getModel(this,pid),endpoint=AiSecureStore.getEndpoint(this,pid);JSONArray history=apiHistory(c);String sid=c.optString("sessionId","");if(history.length()>0)history.put(history.length()-1,new JSONObject().put("role","user").put("text",withTerminalContext(prompt,sid)));String answer=AiApiClient.send(this,AiProvider.byId(pid),model,endpoint,key,history,"",2048);appendChatMessage(c,"assistant",answer);summaries.add(c.optString("name")+": وصل رد");int gap=AiSecureStore.settings(this).getInt("rate_gap_seconds",3);if(gap>0)Thread.sleep(gap*1000L);}catch(Exception e){appendChatMessage(c,"assistant","[خطأ أثناء البث]\n"+e.getMessage());summaries.add(c.optString("name")+": "+e.getMessage());}saveChats();}runOnUiThread(()->{busy = false; updateStatusPill();sendButton.setEnabled(true);rebuildChatSpinner();activeChatId=active;chatsSpinner.setSelection(indexOfChat(activeChatId));updateHeader();renderMessages();kit.infoDialog("نتيجة الإرسال الجماعي",android.text.TextUtils.join("\n",summaries));});});}
+    private void confirmSuggestedCommand(String chatId,String code){JSONObject c=findChat(chatId);if(c==null)return;String sid=c.optString("sessionId","");JSONObject s=AiSecureStore.findById(sessions,sid);String wd=s==null?"~/":s.optString("workdir","~/");kit.confirmDialog("تأكيد أمر اقترحه AI","راجع الأمر بالكامل قبل تشغيله داخل Termux. أي أمر shell قد يعدّل ملفاتك أو يثبت حزمًا.\n\nمجلد التشغيل: "+wd+"\n\n"+code,"تنفيذ داخل Termux",()->{try{int id=TermuxCommandRunner.run(this,code,wd,"AI approved command",true);commandChats.put(id,chatId);Toast.makeText(this,"تم إرسال الأمر إلى Termux؛ ستُضاف المخرجات إلى الدردشة",Toast.LENGTH_LONG).show();}catch(Exception e){alert(e.getMessage());}});}
     private String firstCodeBlock(String s){Matcher m=Pattern.compile("```(?:[a-zA-Z0-9_+.-]+)?\\s*([\\s\\S]*?)```").matcher(s==null?"":s);return m.find()?m.group(1).trim():"";}
     private void captureOrAttach() {
         if (!AiSecureStore.isCaptureActive(this)) {
@@ -1055,16 +1375,13 @@ public class AiAssistantActivity extends Activity {
         } catch (Exception e) { alert(e.getMessage()); }
     }
     private void beginAgentScreenshotCapture(String chatId,String providerId,String model,String endpoint){
-        busy=false;sendButton.setEnabled(true);updateHeader();renderMessages();
+        busy = false; updateStatusPill();sendButton.setEnabled(true);updateHeader();renderMessages();
         AiSecureStore.savePendingScreenshot(this,chatId,providerId,model,endpoint,System.currentTimeMillis());
         boolean active=AiSecureStore.isCaptureActive(this);
         String message=active
                 ? "المساعد يطلب لقطة حديثة من شاشة Termux/TUI. إذا وافقت، سنفتح Termux ونلتقط الشاشة تلقائيًا بعد نحو 4 ثوانٍ. تأكد من إخفاء كلمات السر والرموز الخاصة؛ سترسل اللقطة إلى مزوّد AI المحدد."
                 : "المساعد يطلب لقطة حديثة من Termux/TUI. إذا وافقت، ستظهر نافذة أندرويد لمشاركة الشاشة. بعد الموافقة سنفتح Termux ونلتقط الشاشة تلقائيًا بعد نحو 4 ثوانٍ. تأكد من إخفاء كلمات السر والرموز الخاصة؛ سترسل اللقطة إلى مزوّد AI المحدد.";
-        new AlertDialog.Builder(this).setTitle("AI يطلب لقطة شاشة")
-                .setMessage(message)
-                .setPositiveButton(active?"فتح Termux والتقاط":"السماح والتقاط",(d,w)->{if(active)openTermuxForAgentCapture();else startActivity(new Intent(this,ScreenCaptureActivity.class));})
-                .setNegativeButton("لاحقًا",(d,w)->AiSecureStore.clearPendingScreenshot(this)).show();
+        kit.confirmDialog("AI يطلب لقطة شاشة",message,active?"فتح Termux والتقاط":"السماح والتقاط",()->{if(active)openTermuxForAgentCapture();else startActivity(new Intent(this,ScreenCaptureActivity.class));});
     }
     private void openTermuxForAgentCapture(){
         if(!openTermux()){AiSecureStore.clearPendingScreenshot(this);return;}
@@ -1081,11 +1398,11 @@ public class AiAssistantActivity extends Activity {
         if (isAgentRunCancelled(chatId)) return;
         JSONObject chat = findChat(chatId); if (chat == null) return;
         final String streamId = appendStreamingAssistant(chat);
-        busy = true; if (sendButton != null) sendButton.setEnabled(false);
+        busy = true; updateStatusPill(); if (sendButton != null) sendButton.setEnabled(false);
         if (rateLabel != null) rateLabel.setText("الوكيل يراجع النتيجة ويختار الخطوة التالية…");
         syncAgentWorkspace(() -> {
             JSONObject liveChat = findChat(chatId);
-            if (liveChat == null || isAgentRunCancelled(chatId)) { busy = false; if (sendButton != null) sendButton.setEnabled(true); return; }
+            if (liveChat == null || isAgentRunCancelled(chatId)) { busy = false; updateStatusPill(); if (sendButton != null) sendButton.setEnabled(true); return; }
             String providerId = liveChat.optString("provider", AiSecureStore.getActiveProvider(this));
             String model = AiSecureStore.getModel(this, providerId), endpoint = AiSecureStore.getEndpoint(this, providerId);
             JSONArray history = apiHistory(liveChat);
@@ -1093,7 +1410,7 @@ public class AiAssistantActivity extends Activity {
                 JSONObject tail = history.optJSONObject(history.length() - 1);
                 if (tail != null && "assistant".equals(tail.optString("role", "")) && tail.optString("text", "").trim().isEmpty()) history.remove(history.length() - 1);
             }
-            if (history.length() == 0) { busy = false; if (sendButton != null) sendButton.setEnabled(true); return; }
+            if (history.length() == 0) { busy = false; updateStatusPill(); if (sendButton != null) sendButton.setEnabled(true); return; }
             try { JSONObject last = history.optJSONObject(history.length() - 1); if (last != null) { String value = last.optString("text", ""); if (value.length() > 12000) last.put("text", value.substring(value.length() - 12000)); } } catch (Exception ignored) { }
             final String finalProviderId = providerId, finalModel = model, finalEndpoint = endpoint;
             worker.execute(() -> {
@@ -1124,7 +1441,7 @@ public class AiAssistantActivity extends Activity {
                     try { JSONObject streamEntry = findStreamMessage(findChat(chatId), streamId); if (streamEntry != null && next != null) streamEntry.put("agent_action", next); } catch (Exception ignored) { }
                     visible = normalizeAgentActionForDisplay(visible, next);
                     finishStreamingAssistant(chatId, streamId, visible);
-                    busy = false; if (sendButton != null) sendButton.setEnabled(true); updateHeader();
+                    busy = false; updateStatusPill(); if (sendButton != null) sendButton.setEnabled(true); updateHeader();
                     if (isAgentRunCancelled(chatId)) return;
                     if (thinkingOnly) { queueAgentContinuation(chatId, true); return; }
                     if (emptyAnswer) { noProgressContinuations.put(chatId, 0); return; }
@@ -1152,7 +1469,7 @@ public class AiAssistantActivity extends Activity {
         appendChatMessage(chat,"user","[لقطة الشاشة التي طلبتها مرفقة الآن. حلّل ما يظهر فيها، خاصة مخرجات الطرفية أو TUI.]"); saveChats();
         JSONArray history=apiHistory(chat);
         final String streamId=appendStreamingAssistant(chat);
-        renderMessages(); busy=true; if(sendButton!=null)sendButton.setEnabled(false); rateLabel.setText("إرسال لقطة الشاشة وتحليلها تدريجيًا…");
+        renderMessages(); busy = true; updateStatusPill(); if(sendButton!=null)sendButton.setEnabled(false); rateLabel.setText("إرسال لقطة الشاشة وتحليلها تدريجيًا…");
         worker.execute(()->{
             String answer;
             try{
@@ -1165,7 +1482,7 @@ public class AiAssistantActivity extends Activity {
             runOnUiThread(()->{
                 String visible=result.replace("[TFM_SCREENSHOT]","").replace("[REQUEST_SCREENSHOT]","").trim();
                 if(visible.isEmpty()&&!result.startsWith("[تعذر"))visible="وصلت الصورة لكن المزوّد لم يرجع نص إجابة.";
-                finishStreamingAssistant(chatId,streamId,visible); busy=false; if(sendButton!=null)sendButton.setEnabled(true); updateHeader();
+                finishStreamingAssistant(chatId,streamId,visible); busy = false; updateStatusPill(); if(sendButton!=null)sendButton.setEnabled(true); updateHeader();
                 if(result.contains("[TFM_SCREENSHOT]")||result.contains("[REQUEST_SCREENSHOT]"))Toast.makeText(this,"تجاهلنا طلب لقطة إضافية في نفس الدور لمنع الالتقاط المتكرر.",Toast.LENGTH_LONG).show();
             });
         });
@@ -1178,7 +1495,7 @@ public class AiAssistantActivity extends Activity {
                 "أوامر Terminal سريعة", "إرسال النص إلى كل الدردشات", "فتح تطبيق Termux",
                 "لقطة شاشة / إرفاق صورة", "حذف آخر لقطة", "إيقاف دورة الوكيل بعد العملية الحالية", "إيقاف مشاركة الشاشة"
         };
-        new AlertDialog.Builder(this).setTitle("خيارات الوكيل").setItems(items, (d, w) -> {
+        kit.sheet("خيارات الوكيل", items, w -> {
             if (w == 0) chooseAgentChat();
             else if (w == 1) { newChat(true); updateHeader(); renderMessages(); }
             else if (w == 2) chooseProviderForChat();
@@ -1194,25 +1511,25 @@ public class AiAssistantActivity extends Activity {
             else if (w == 12) stopAgentRun();
             else { try { startService(new Intent(this, ScreenCaptureService.class).setAction(ScreenCaptureService.ACTION_STOP)); } catch (Exception ignored) { }
                 AiSecureStore.setCaptureActive(this, false); Toast.makeText(this, "تم طلب إيقاف مشاركة الشاشة", Toast.LENGTH_SHORT).show(); }
-        }).show();
+        });
     }
 
     private void showTerminalPopup(){
         sessions=AiSecureStore.loadArray(this,AiSecureStore.SESSIONS,"items");if(sessions.length()==0){startActivity(new Intent(this,TerminalSessionsActivity.class));return;}
-        android.app.Dialog dialog=new android.app.Dialog(this);LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);box.setPadding(dp(12),dp(10),dp(12),dp(12));box.setBackground(round(BG,16,DIVIDER));
-        LinearLayout header=new LinearLayout(this);header.setGravity(Gravity.CENTER_VERTICAL);TextView title=text("Terminal popup",17,TEXT,true);header.addView(title,new LinearLayout.LayoutParams(0,dp(38),1));Button close=button("إغلاق",PANEL2,TEXT);header.addView(close,new LinearLayout.LayoutParams(dp(64),dp(36)));close.setOnClickListener(v->dialog.dismiss());box.addView(header);
+        android.app.Dialog dialog=new android.app.Dialog(this);LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);box.setPadding(kit.dp(16),kit.dp(14),kit.dp(16),kit.dp(14));box.setBackground(kit.round(kit.panel,22,kit.outline));
+        LinearLayout header=new LinearLayout(this);header.setGravity(Gravity.CENTER_VERTICAL);TextView title=kit.text("نافذة Terminal",17,kit.text,true);header.addView(title,new LinearLayout.LayoutParams(0,kit.dp(38),1));Button close=kit.ghost("إغلاق");close.setTextSize(12);header.addView(close,new LinearLayout.LayoutParams(kit.dp(72),kit.dp(36)));close.setOnClickListener(v->dialog.dismiss());box.addView(header);
         Spinner sessionPick=new Spinner(this);List<String> sessionLabels=new ArrayList<>();for(int i=0;i<sessions.length();i++){JSONObject o=sessions.optJSONObject(i);sessionLabels.add(o.optString("name","Terminal")+" · "+o.optString("workdir","~/"));}sessionPick.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,sessionLabels));box.addView(sessionPick,match());
-        EditText cmd= new EditText(this);cmd.setHint("أمر Shell متعدد الأسطر");cmd.setTextColor(TEXT);cmd.setHintTextColor(MUTED);cmd.setTypeface(Typeface.MONOSPACE);cmd.setGravity(Gravity.TOP|Gravity.START);cmd.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_FLAG_MULTI_LINE|InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);cmd.setMinLines(2);cmd.setMaxLines(5);cmd.setPadding(dp(9),dp(6),dp(9),dp(6));cmd.setBackground(round(PANEL2,10,DIVIDER));box.addView(cmd,new LinearLayout.LayoutParams(-1,dp(86)));
-        TextView out=text("Ready. Output appears here.",11,TEXT,false);out.setTypeface(Typeface.MONOSPACE);out.setTextIsSelectable(true);out.setGravity(Gravity.TOP|Gravity.START);out.setPadding(dp(8),dp(8),dp(8),dp(8));out.setBackground(round(PANEL,9,DIVIDER));ScrollView scroll=new ScrollView(this);scroll.addView(out);LinearLayout.LayoutParams sl=new LinearLayout.LayoutParams(-1,0,1);sl.topMargin=dp(7);sl.bottomMargin=dp(7);box.addView(scroll,sl);
-        LinearLayout actions=new LinearLayout(this);Button run=button("تنفيذ وإظهار المخرجات",PANEL2,ACCENT);Button tui=button("TUI في Termux",PANEL2,TEXT);Button manage=button("كل الجلسات",PANEL,TEXT);actions.addView(run,new LinearLayout.LayoutParams(0,dp(42),1));LinearLayout.LayoutParams tp=new LinearLayout.LayoutParams(0,dp(42),1);tp.leftMargin=dp(4);actions.addView(tui,tp);box.addView(actions);manage.setOnClickListener(v->{dialog.dismiss();startActivity(new Intent(this,TerminalSessionsActivity.class));});box.addView(manage,match());
-        run.setOnClickListener(v->{String command=cmd.getText().toString().trim();if(command.isEmpty())return;int pos=sessionPick.getSelectedItemPosition();JSONObject session=sessions.optJSONObject(Math.max(0,Math.min(pos,sessions.length()-1)));String sid=session.optString("id"),wd=session.optString("workdir","~/");new AlertDialog.Builder(this).setTitle("تأكيد تشغيل الأمر").setMessage(command).setPositiveButton("تنفيذ",(d,w)->{try{int id=TermuxCommandRunner.run(this,command,wd,"TFM popup terminal",true);popupCommands.put(id,new PopupCommand(out,sid));out.append("\n$ "+command+"\n[قيد التنفيذ]\n");}catch(Exception e){alert(e.getMessage());}}).setNegativeButton("إلغاء",null).show();});
+        EditText cmd= new EditText(this);cmd.setHint("أمر Shell متعدد الأسطر");cmd.setTextColor(kit.text);cmd.setHintTextColor(kit.muted);cmd.setTypeface(Typeface.MONOSPACE);cmd.setGravity(Gravity.TOP|Gravity.START);cmd.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_FLAG_MULTI_LINE|InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);cmd.setMinLines(2);cmd.setMaxLines(5);cmd.setPadding(kit.dp(10),kit.dp(8),kit.dp(10),kit.dp(8));cmd.setBackground(kit.round(kit.panelAlt,12,kit.outline));box.addView(cmd,new LinearLayout.LayoutParams(-1,kit.dp(86)));
+        TextView out=kit.mono("جاهز. المخرجات تظهر هنا.",11,kit.text);out.setTextIsSelectable(true);out.setGravity(Gravity.TOP|Gravity.START);out.setPadding(kit.dp(10),kit.dp(9),kit.dp(10),kit.dp(9));out.setBackground(kit.round(kit.bg,10,kit.outline));ScrollView scroll=new ScrollView(this);scroll.addView(out);LinearLayout.LayoutParams sl=new LinearLayout.LayoutParams(-1,0,1);sl.topMargin=dp(7);sl.bottomMargin=dp(7);box.addView(scroll,sl);
+        LinearLayout actions=new LinearLayout(this);actions.setOrientation(LinearLayout.HORIZONTAL);Button run=kit.primary("تنفيذ وإظهار المخرجات");run.setTextSize(12);Button tui=kit.ghost("TUI في Termux");tui.setTextSize(12);Button manage=kit.ghost("كل الجلسات");manage.setTextSize(12);actions.addView(run,new LinearLayout.LayoutParams(0,kit.dp(42),1.3f));LinearLayout.LayoutParams tp=new LinearLayout.LayoutParams(0,kit.dp(42),1);tp.leftMargin=kit.dp(6);actions.addView(tui,tp);LinearLayout.LayoutParams mgp=new LinearLayout.LayoutParams(0,kit.dp(42),1);mgp.leftMargin=kit.dp(6);actions.addView(manage,mgp);box.addView(actions);manage.setOnClickListener(v->{dialog.dismiss();startActivity(new Intent(this,TerminalSessionsActivity.class));});
+        run.setOnClickListener(v->{String command=cmd.getText().toString().trim();if(command.isEmpty())return;int pos=sessionPick.getSelectedItemPosition();JSONObject session=sessions.optJSONObject(Math.max(0,Math.min(pos,sessions.length()-1)));String sid=session.optString("id"),wd=session.optString("workdir","~/");kit.confirmDialog("تأكيد تشغيل الأمر",command,"تنفيذ",()->{try{int id=TermuxCommandRunner.run(this,command,wd,"TFM popup terminal",true);popupCommands.put(id,new PopupCommand(out,sid));out.append("\n$ "+command+"\n[قيد التنفيذ]\n");}catch(Exception e){alert(e.getMessage());}});});
         tui.setOnClickListener(v->{String command=cmd.getText().toString().trim();if(command.isEmpty())command="exec bash -l";int pos=sessionPick.getSelectedItemPosition();JSONObject session=sessions.optJSONObject(Math.max(0,Math.min(pos,sessions.length()-1)));try{TermuxCommandRunner.openTui(this,command,session.optString("workdir","~/"),"TFM popup TUI");out.append("\n[فتحنا الأمر داخل Termux: "+command+"]\n");}catch(Exception e){alert(e.getMessage());}});
         dialog.setContentView(box);android.view.Window w=dialog.getWindow();if(w!=null){w.setBackgroundDrawableResource(android.R.color.transparent);w.setLayout((int)(getResources().getDisplayMetrics().widthPixels*0.94), (int)(getResources().getDisplayMetrics().heightPixels*0.80));}dialog.show();if(dialog.getWindow()!=null)dialog.getWindow().setLayout((int)(getResources().getDisplayMetrics().widthPixels*0.94),(int)(getResources().getDisplayMetrics().heightPixels*0.80));
     }
     private void appendSessionOutput(String sid,String output){JSONArray arr=AiSecureStore.loadArray(this,AiSecureStore.SESSIONS,"items");JSONObject session=AiSecureStore.findById(arr,sid);if(session==null)return;String old=session.optString("output","");if(old.length()>20000)old=old.substring(old.length()-15000);try{session.put("output",old+output);AiSecureStore.saveArray(this,AiSecureStore.SESSIONS,"items",arr);}catch(Exception ignored){}}
-    private void chatMenu(){String[] actions={"إعادة تسمية الدردشة","حذف الدردشة","إعدادات الذكاء الاصطناعي","إدارة جلسات Terminal","تبديل وضع التنفيذ التلقائي لهذه الدردشة"};new AlertDialog.Builder(this).setTitle("الدردشة الحالية").setItems(actions,(d,w)->{if(w==0)renameChat();if(w==1)deleteChat();if(w==2)startActivity(new Intent(this,AiSettingsActivity.class));if(w==3)startActivity(new Intent(this,TerminalSessionsActivity.class));if(w==4)toggleChatAutoExecution();}).show();}
-    private void renameChat(){JSONObject c=current();if(c==null)return;EditText e=new EditText(this);e.setText(c.optString("name"));new AlertDialog.Builder(this).setTitle("اسم الدردشة").setView(e).setPositiveButton("حفظ",(d,w)->{try{c.put("name",e.getText().toString().trim().isEmpty()?"AI Chat":e.getText().toString().trim());saveChats();rebuildChatSpinner();chatsSpinner.setSelection(indexOfChat(activeChatId));}catch(Exception ignored){}}).setNegativeButton("إلغاء",null).show();}
-    private void deleteChat(){if(chats.length()<=1){new AlertDialog.Builder(this).setMessage("احتفظ بدردشة واحدة على الأقل.").setPositiveButton("حسنًا",null).show();return;}new AlertDialog.Builder(this).setTitle("حذف الدردشة؟").setMessage("سيُحذف سجل هذه الدردشة المحلي فقط.").setPositiveButton("حذف",(d,w)->{JSONArray n=new JSONArray();for(int i=0;i<chats.length();i++){JSONObject c=chats.optJSONObject(i);if(c!=null&&!activeChatId.equals(c.optString("id")))n.put(c);}chats=n;activeChatId=chats.optJSONObject(0).optString("id");saveChats();rebuildChatSpinner();updateHeader();renderMessages();}).setNegativeButton("إلغاء",null).show();}
+    private void chatMenu(){String[] actions={"إعادة تسمية الدردشة","حذف الدردشة","إعدادات الذكاء الاصطناعي","إدارة جلسات Terminal","تبديل وضع التنفيذ التلقائي لهذه الدردشة"};kit.sheet("الدردشة الحالية",actions,w->{if(w==0)renameChat();if(w==1)deleteChat();if(w==2)startActivity(new Intent(this,AiSettingsActivity.class));if(w==3)startActivity(new Intent(this,TerminalSessionsActivity.class));if(w==4)toggleChatAutoExecution();});}
+    private void renameChat(){JSONObject c=current();if(c==null)return;kit.promptDialog("اسم الدردشة","اسم جديد للدردشة",c.optString("name"),"حفظ",value->{try{c.put("name",value.isEmpty()?"AI Chat":value);saveChats();rebuildChatSpinner();chatsSpinner.setSelection(indexOfChat(activeChatId));updateHeader();}catch(Exception ignored){}});}
+    private void deleteChat(){if(chats.length()<=1){alert("احتفظ بدردشة واحدة على الأقل.");return;}kit.confirmDialog("حذف الدردشة؟","سيُحذف سجل هذه الدردشة المحلي فقط.","حذف",()->{JSONArray n=new JSONArray();for(int i=0;i<chats.length();i++){JSONObject c=chats.optJSONObject(i);if(c!=null&&!activeChatId.equals(c.optString("id")))n.put(c);}chats=n;activeChatId=chats.optJSONObject(0).optString("id");saveChats();rebuildChatSpinner();updateHeader();renderMessages();});}
     private List<String> chatNames(){List<String> a=new ArrayList<>();for(int i=0;i<chats.length();i++){JSONObject c=chats.optJSONObject(i);a.add(c==null?"AI Chat":c.optString("name","AI Chat")+" · "+AiProvider.byId(c.optString("provider","gemini")).name);}return a;}
     private int indexOfChat(String id){for(int i=0;i<chats.length();i++)if(id.equals(chats.optJSONObject(i).optString("id")))return i;return 0;}
     private void rebuildChatSpinner(){chatsSpinner.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,chatNames()));chatsSpinner.setSelection(indexOfChat(activeChatId));}
@@ -1224,16 +1541,16 @@ public class AiAssistantActivity extends Activity {
     private Button button(String s,int bg,int fg){Button b=new Button(this);b.setText(s);b.setTextColor(fg);b.setTextSize(12);b.setAllCaps(false);b.setMinHeight(0);b.setMinimumHeight(0);b.setPadding(dp(5),dp(4),dp(5),dp(4));b.setBackground(round(bg,10,Color.TRANSPARENT));return b;}
     private GradientDrawable round(int c,int r,int stroke){GradientDrawable d=new GradientDrawable();d.setColor(c);d.setCornerRadius(dp(r));if(stroke!=Color.TRANSPARENT)d.setStroke(dp(1),stroke);return d;}
     private LinearLayout.LayoutParams match(){LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.WRAP_CONTENT);p.bottomMargin=dp(4);return p;}
-    private void alert(String s){new AlertDialog.Builder(this).setMessage(s).setPositiveButton("حسنًا",null).show();}
+    private void alert(String s){kit.infoDialog(null, s);}
     private int dp(float x){return (int)(x*getResources().getDisplayMetrics().density+0.5f);}
 
     private void chooseAgentChat() {
         String[] names = chatNames().toArray(new String[0]);
         if (names.length == 0) { newChat(true); return; }
-        new AlertDialog.Builder(this).setTitle("اختيار الدردشة").setItems(names, (d, which) -> {
+        kit.sheet("اختيار الدردشة", names, which -> {
             JSONObject chat = chats.optJSONObject(which); if (chat == null) return;
             activeChatId = chat.optString("id", ""); saveChats(); updateHeader(); renderMessages();
-        }).show();
+        });
     }
 
     private void chooseProviderForChat() {
@@ -1241,13 +1558,13 @@ public class AiAssistantActivity extends Activity {
         for (int i = 0; i < providers.size(); i++) labels[i] = providers.get(i).name + " · " + AiSecureStore.getModel(this, providers.get(i).id);
         JSONObject chat = current(); if (chat == null) return;
         int checked = AiProvider.indexOf(chat.optString("provider", AiSecureStore.getActiveProvider(this)));
-        new AlertDialog.Builder(this).setTitle("المزوّد والنموذج").setSingleChoiceItems(labels, checked, (dialog, which) -> {
+        kit.sheet("المزوّد والنموذج", labels, which -> {
             String provider = providers.get(which).id;
             try { chat.put("provider", provider); } catch (Exception ignored) { }
             saveChats();
             AgentWorkspace.persistChatOverride(this, chat.optString("id"), provider, chat.optString("sessionId", ""), chat.has("agent_auto_execute") ? Boolean.valueOf(chat.optBoolean("agent_auto_execute")) : null);
-            updateHeader(); renderMessages(); dialog.dismiss();
-        }).setNegativeButton("إلغاء", null).show();
+            updateHeader(); renderMessages();
+        });
     }
 
     private void chooseTerminalSessionForChat() {
@@ -1255,13 +1572,13 @@ public class AiAssistantActivity extends Activity {
         List<String> labels = terminalNames(); String[] names = labels.toArray(new String[0]);
         JSONObject chat = current(); if (chat == null) return;
         int checked = Math.max(0, indexOfSession(chat.optString("sessionId", "")));
-        new AlertDialog.Builder(this).setTitle("جلسة Termux المرتبطة").setSingleChoiceItems(names, checked, (dialog, which) -> {
+        kit.sheet("جلسة Termux المرتبطة", names, which -> {
             String sid = sessionIdAt(which);
             try { chat.put("sessionId", sid); } catch (Exception ignored) { }
             saveChats(); AgentWorkspace.persistChatOverride(this, chat.optString("id"), chat.optString("provider", "gemini"), sid,
                     chat.has("agent_auto_execute") ? Boolean.valueOf(chat.optBoolean("agent_auto_execute")) : null);
-            updateHeader(); renderMessages(); dialog.dismiss();
-        }).setNegativeButton("إلغاء", null).show();
+            updateHeader(); renderMessages();
+        });
     }
 
     private void syncAgentWorkspace(Runnable afterSync) {
@@ -1398,7 +1715,7 @@ public class AiAssistantActivity extends Activity {
             if (!isAgentRunCancelled(chatId)) autoAnalyzeCommandResult(chatId);
             return;
         }
-        busy = true; if (sendButton != null) sendButton.setEnabled(false);
+        busy = true; updateStatusPill(); if (sendButton != null) sendButton.setEnabled(false);
         worker.execute(() -> {
             String result;
             try { result = AgentWebSearch.search(query); }
@@ -1406,7 +1723,7 @@ public class AiAssistantActivity extends Activity {
             final String output = result;
             runOnUiThread(() -> {
                 addAgentToolOutput(chatId, "Web search results", output);
-                busy = false; if (sendButton != null) sendButton.setEnabled(true); updateHeader();
+                busy = false; updateStatusPill(); if (sendButton != null) sendButton.setEnabled(true); updateHeader();
                 if (!isAgentRunCancelled(chatId)) autoAnalyzeCommandResult(chatId);
             });
         });

@@ -1320,6 +1320,77 @@ public class AiAssistantActivity extends Activity {
         autoAnalyzeCommandResult(chatId);
     }
 
+    /**
+     * Appends tool/search results to the current agent run. renderMessages() groups
+     * all non-user events into one compact work bubble.
+     */
+    private void addAgentToolOutput(String chatId, String label, String output) {
+        JSONObject chat = findChat(chatId);
+        if (chat == null) return;
+        try {
+            JSONArray messages = chat.optJSONArray("messages");
+            if (messages == null) messages = new JSONArray();
+            JSONObject event = msg("tool_output", output == null ? "" : output);
+            event.put("tool_label", label == null || label.trim().isEmpty() ? "Tool output" : label);
+            event.put("display_path", "");
+            messages.put(event);
+            while (messages.length() > 80) messages.remove(0);
+            chat.put("messages", messages);
+            saveChats();
+            if (chatId.equals(activeChatId)) renderMessages();
+        } catch (Exception e) {
+            appendChatMessage(chat, "assistant", "تعذر عرض مخرجات الأداة: " + e.getMessage());
+            saveChats();
+            if (chatId.equals(activeChatId)) renderMessages();
+        }
+    }
+
+    /** Convert internal control/tool JSON into readable text without hiding real shell actions. */
+    private String normalizeAgentActionForDisplay(String original, JSONObject action) {
+        if (action == null) return original == null ? "" : original;
+        String tool = action.optString("tool", action.optString("name", ""));
+        if ("finish".equals(tool)) {
+            return action.optString("message", action.optString("content",
+                    action.optString("result", "اكتملت المهمة.")));
+        }
+        if ("continue".equals(tool)) {
+            return action.optString("message", action.optString("status",
+                    action.optString("reason", "أكمل العمل بالخطوة التالية.")));
+        }
+        if ("web_search".equals(tool)) {
+            JSONObject args = action.optJSONObject("arguments");
+            String query = action.optString("query", "");
+            if (query.trim().isEmpty() && args != null) query = args.optString("query", args.optString("q", ""));
+            return "أبحث بالإنترنت عن: " + (query.trim().isEmpty() ? "الموضوع المطلوب" : query)
+                    + "\n" + action.optString("reason", "أتحقق من مصادر قبل إكمال الإجابة.");
+        }
+        if ("save_memory".equals(tool) || "remember".equals(tool)) {
+            return action.optString("message", "أحفظ المعلومة في الذاكرة الدائمة ~/.TFM-setting/Memory.md.");
+        }
+        return original == null ? "" : original;
+    }
+
+    /** Actions managed by the agent loop rather than a shell command. */
+    private boolean isInternalAgentAction(JSONObject action) {
+        if (action == null) return false;
+        String tool = action.optString("tool", action.optString("name", ""));
+        return "finish".equals(tool) || "continue".equals(tool) || "web_search".equals(tool)
+                || "save_memory".equals(tool) || "remember".equals(tool);
+    }
+
+    /** Stops further automatic turns for the active conversation. In-flight HTTP/shell work may finish. */
+    private void stopAgentRun() {
+        JSONObject chat = current();
+        if (chat == null) return;
+        String chatId = chat.optString("id", "");
+        if (chatId.isEmpty()) return;
+        cancelledAgentRuns.put(chatId, true);
+        if (rateLabel != null) rateLabel.setText("تم طلب إيقاف دورة الوكيل.");
+        Toast.makeText(this,
+                "توقف الوكيل عن بدء خطوات جديدة؛ العملية الجارية قد تكمل قبل الإيقاف.",
+                Toast.LENGTH_LONG).show();
+    }
+
     private void runWebSearch(String chatId, String query) {
         if (!AiSecureStore.settings(this).getBoolean("agent_web_search_enabled", true)) {
             appendChatMessage(findChat(chatId), "assistant", "البحث عبر الإنترنت متوقف حسب config.json. فعّل agent.webSearch إذا تحتاج مصادر حديثة.");

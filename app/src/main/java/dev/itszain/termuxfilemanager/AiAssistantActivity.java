@@ -216,7 +216,48 @@ public class AiAssistantActivity extends Activity {
         if (terminalSpinner != null && terminalSpinner.getSelectedItemPosition() != sessionIndex) terminalSpinner.setSelection(Math.max(0, sessionIndex));
         updatingSpinners = false;
     }
-    private void renderMessages(){if(messagesBox==null)return;activeStreams.clear();messagesBox.removeAllViews();JSONObject c=current();if(c==null)return;JSONArray m=c.optJSONArray("messages");if(m==null||m.length()==0){TextView welcome=text("المساعد جاهز. اضبط المزوّد والمفتاح من ⚙. اربط الدردشة بجلسة Terminal للحصول على سياق آخر مخرجاتها. كل أمر يقترحه الذكاء الاصطناعي يحتاج موافقتك قبل التنفيذ.",13,MUTED,false);welcome.setPadding(dp(12),dp(12),dp(12),dp(12));welcome.setBackground(round(PANEL,12,DIVIDER));messagesBox.addView(welcome,match());return;}for(int i=0;i<m.length();i++){JSONObject msg=m.optJSONObject(i);if(msg!=null)addMessageView(msg,c.optString("id"));}messagesScroll.post(()->messagesScroll.fullScroll(View.FOCUS_DOWN));}
+    private void renderMessages() {
+        if (messagesBox == null) return;
+        activeStreams.clear();
+        messagesBox.removeAllViews();
+        JSONObject chat = current();
+        if (chat == null) return;
+        JSONArray all = chat.optJSONArray("messages");
+        if (all == null || all.length() == 0) {
+            TextView welcome = text("المساعد جاهز. كل أدوات الوكيل والتفكير ومخرجاتها راح تنعرض بفقاعة عمل واحدة. الأوامر تبقى خاضعة لإعدادات الموافقة.", 13, MUTED, false);
+            welcome.setPadding(dp(12), dp(12), dp(12), dp(12));
+            welcome.setBackground(round(PANEL, 12, DIVIDER));
+            messagesBox.addView(welcome, match());
+            return;
+        }
+        int i = 0;
+        while (i < all.length()) {
+            JSONObject item = all.optJSONObject(i);
+            if (item == null) { i++; continue; }
+            if (isVisibleUserPrompt(item)) {
+                addMessageView(item, chat.optString("id"));
+                i++;
+                continue;
+            }
+            JSONArray run = new JSONArray();
+            while (i < all.length()) {
+                JSONObject event = all.optJSONObject(i);
+                if (event == null) { i++; continue; }
+                if (isVisibleUserPrompt(event)) break;
+                run.put(event);
+                i++;
+            }
+            if (run.length() > 0) addAgentRunBubble(chat.optString("id"), run);
+        }
+        messagesScroll.post(() -> messagesScroll.fullScroll(View.FOCUS_DOWN));
+    }
+
+    private boolean isVisibleUserPrompt(JSONObject message) {
+        if (message == null || !"user".equals(message.optString("role", ""))) return false;
+        String value = message.optString("text", "").trim();
+        return !value.startsWith("[نتيجة أداة") && !value.startsWith("[Agent tool result]");
+    }
+
     private void addMessageView(JSONObject m, String chatId) {
         String role = m.optString("role", "user"), txt = m.optString("text", "");
         if ("agent_control".equals(role)) return;
@@ -274,6 +315,208 @@ public class AiAssistantActivity extends Activity {
         p.width = ViewGroup.LayoutParams.MATCH_PARENT;
         p.gravity = assistant ? Gravity.START : Gravity.END;
         messagesBox.addView(bubble, p);
+    }
+
+    /** One compact assistant bubble contains every turn, thought, tool invocation and result until the next user prompt. */
+    private void addAgentRunBubble(String chatId, JSONArray events) {
+        LinearLayout bubble = new LinearLayout(this);
+        bubble.setOrientation(LinearLayout.VERTICAL);
+        bubble.setPadding(dp(11), dp(8), dp(11), dp(8));
+        bubble.setBackground(round(PANEL2, 13, ACCENT));
+        TextView title = text("AI Agent · " + AiProvider.byId(providerFor(chatId)).name, 10, ACCENT, true);
+        bubble.addView(title, compactParams());
+
+        for (int i = 0; i < events.length(); i++) {
+            JSONObject event = events.optJSONObject(i);
+            if (event == null) continue;
+            String role = event.optString("role", "");
+            if ("agent_control".equals(role)) continue;
+
+            if ("tool_output".equals(role)) {
+                String label = event.optString("tool_label", "Tool output");
+                String raw = event.optString("text", "");
+                addAgentExpandableRow(bubble, "TOOL output · " + compactToolLabel(label),
+                        raw.length() + " chars · اضغط لعرض المخرجات", raw, null, chatId, false);
+                continue;
+            }
+            if ("user".equals(role) && event.optString("text", "").trim().startsWith("[نتيجة أداة")) {
+                String raw = event.optString("text", "");
+                addAgentExpandableRow(bubble, "TOOL output · install_skill", raw.length() + " chars · اضغط للتفاصيل", raw, null, chatId, false);
+                continue;
+            }
+            if (!"assistant".equals(role)) continue;
+
+            String rawText = event.optString("text", "");
+            String thought = event.optString("thinking", "");
+            String streamId = event.optString("stream_id", "");
+            boolean streaming = event.optBoolean("streaming", false) && !streamId.isEmpty();
+            JSONObject action = event.optJSONObject("agent_action");
+            if (action == null) action = extractAgentAction(rawText);
+
+            if (streaming) {
+                Button thoughtToggle = button(thought.isEmpty() ? "Thinking · بانتظار ملخص التفكير" : "Thinking · " + thought.length() + " chars", BG, MUTED);
+                thoughtToggle.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+                thoughtToggle.setTextSize(11);
+                thoughtToggle.setVisibility(thought.isEmpty() ? View.GONE : View.VISIBLE);
+                LinearLayout thoughtBody = new LinearLayout(this);
+                thoughtBody.setOrientation(LinearLayout.VERTICAL);
+                thoughtBody.setPadding(dp(8), dp(5), dp(8), dp(5));
+                thoughtBody.setBackground(round(BG, 8, DIVIDER));
+                TextView thoughtView = text(thought.isEmpty() ? "" : thought, 11, MUTED, false);
+                thoughtView.setGravity(Gravity.TOP | Gravity.START);
+                thoughtView.setTextIsSelectable(true);
+                thoughtBody.addView(thoughtView, compactParams());
+                thoughtBody.setVisibility(View.GONE);
+                thoughtToggle.setOnClickListener(v -> {
+                    boolean show = thoughtBody.getVisibility() != View.VISIBLE;
+                    thoughtBody.setVisibility(show ? View.VISIBLE : View.GONE);
+                });
+                bubble.addView(thoughtToggle, compactParams());
+                bubble.addView(thoughtBody, compactParams());
+                addCompactDivider(bubble);
+
+                boolean looksLikeToolJson = looksLikeAgentActionPayload(rawText);
+                TextView liveAnswer = text(rawText.isEmpty() ? "" : (looksLikeToolJson ? "جاري تجهيز استدعاء الأداة…" : rawText), 13, TEXT, false);
+                liveAnswer.setGravity(Gravity.TOP | Gravity.START);
+                liveAnswer.setTextIsSelectable(true);
+                liveAnswer.setVisibility(rawText.isEmpty() || looksLikeToolJson ? View.GONE : View.VISIBLE);
+                bubble.addView(liveAnswer, compactParams());
+                activeStreams.put(streamId, new StreamViews(liveAnswer, thoughtView, thoughtToggle, thoughtBody));
+                continue;
+            }
+
+            if (thought != null && !thought.trim().isEmpty()) {
+                addAgentExpandableRow(bubble, "Thinking · " + thought.length() + " chars",
+                        "اضغط لعرض ملخص التفكير", thought, null, chatId, false);
+            }
+
+            if (action != null) {
+                String tool = action.optString("tool", action.optString("name", ""));
+                if ("finish".equals(tool) || "continue".equals(tool)) {
+                    if (!rawText.trim().isEmpty()) addMarkdownContent(bubble, rawText, chatId);
+                    continue;
+                }
+                JSONObject pairedOutput = null;
+                if (i + 1 < events.length()) {
+                    JSONObject next = events.optJSONObject(i + 1);
+                    if (next != null && ("tool_output".equals(next.optString("role", ""))
+                            || ("user".equals(next.optString("role", "")) && next.optString("text", "").trim().startsWith("[نتيجة أداة")))) {
+                        pairedOutput = next;
+                    }
+                }
+                String details = describeAgentTool(action);
+                if (pairedOutput != null) {
+                    details += "\n\n--- TOOL OUTPUT ---\n" + pairedOutput.optString("text", "");
+                    i++;
+                }
+                addAgentExpandableRow(bubble, "TOOL called · " + compactToolLabel(tool),
+                        pairedOutput == null ? "اضغط لعرض الأداة والإجراء" : "الأداة والمخرجات · اضغط للتفاصيل",
+                        details, action, chatId, pairedOutput != null);
+                continue;
+            }
+
+            if (!rawText.trim().isEmpty()) addMarkdownContent(bubble, rawText, chatId);
+        }
+        LinearLayout.LayoutParams lp = match();
+        lp.topMargin = dp(5);
+        lp.width = ViewGroup.LayoutParams.MATCH_PARENT;
+        lp.gravity = Gravity.START;
+        messagesBox.addView(bubble, lp);
+    }
+
+    private void addAgentExpandableRow(LinearLayout parent, String heading, String summary, String details,
+                                       JSONObject action, String chatId, boolean alreadyExecuted) {
+        Button row = button("›  " + heading, PANEL, ACCENT);
+        row.setContentDescription(summary);
+        row.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        row.setTextSize(11);
+        row.setMinHeight(dp(34));
+        row.setPadding(dp(7), dp(3), dp(7), dp(3));
+        parent.addView(row, compactParams());
+
+        LinearLayout detailBox = new LinearLayout(this);
+        detailBox.setOrientation(LinearLayout.VERTICAL);
+        detailBox.setPadding(dp(8), dp(6), dp(8), dp(6));
+        detailBox.setBackground(round(BG, 8, DIVIDER));
+        TextView content = text(details == null ? "" : details, 11, TEXT, false);
+        content.setGravity(Gravity.TOP | Gravity.START);
+        content.setTextIsSelectable(true);
+        content.setTypeface(Typeface.MONOSPACE);
+        detailBox.addView(content, compactParams());
+
+        if (action != null && !alreadyExecuted) {
+            String tool = action.optString("tool", action.optString("name", ""));
+            if (!"finish".equals(tool) && !"continue".equals(tool)
+                    && !autoExecutionEnabled(chatId) && isRunnableAgentAction(action)) {
+                Button run = button("مراجعة وتشغيل الأداة", ACCENT, BG);
+                run.setOnClickListener(v -> confirmAgentAction(chatId, action));
+                detailBox.addView(run, compactParams());
+                String command = agentCommand(action);
+                if (!command.trim().isEmpty()) {
+                    Button copy = button("نسخ الأمر", PANEL, TEXT);
+                    copy.setOnClickListener(v -> copyText("AI command", command));
+                    detailBox.addView(copy, compactParams());
+                }
+            }
+        }
+        detailBox.setVisibility(View.GONE);
+        parent.addView(detailBox, compactParams());
+        row.setOnClickListener(v -> {
+            boolean show = detailBox.getVisibility() != View.VISIBLE;
+            detailBox.setVisibility(show ? View.VISIBLE : View.GONE);
+            row.setText((show ? "⌄  " : "›  ") + heading);
+        });
+        addCompactDivider(parent);
+    }
+
+    private boolean isRunnableAgentAction(JSONObject action) {
+        if (action == null) return false;
+        String tool = action.optString("tool", action.optString("name", "run_shell"));
+        if ("install_skill".equals(tool)) return true;
+        if ("run_shell".equals(tool) || "shell".equals(tool) || "run_command".equals(tool)) return !agentCommand(action).trim().isEmpty();
+        // These internal/read-only tools are auto-dispatched by the agent loop; showing a second
+        // manual-run button could launch the same operation twice while its result is in flight.
+        return false;
+    }
+
+    private String describeAgentTool(JSONObject action) {
+        String tool = action.optString("tool", action.optString("name", "unknown"));
+        StringBuilder out = new StringBuilder("Tool: ").append(tool);
+        String reason = action.optString("reason", "");
+        if (!reason.isEmpty()) out.append("\nReason: ").append(reason);
+        String command = agentCommand(action);
+        if (!command.isEmpty()) out.append("\nCommand:\n").append(command);
+        String query = action.optString("query", "");
+        JSONObject args = action.optJSONObject("arguments");
+        if (query.isEmpty() && args != null) query = args.optString("query", args.optString("q", ""));
+        if (!query.isEmpty()) out.append("\nQuery: ").append(query);
+        String url = action.optString("url", action.optString("source", ""));
+        if (!url.isEmpty()) out.append("\nURL: ").append(url);
+        String workdir = action.optString("workdir", args == null ? "" : args.optString("workdir", ""));
+        if (!workdir.isEmpty()) out.append("\nWorking directory: ").append(workdir);
+        String risk = action.optString("risk", "");
+        if (!risk.isEmpty()) out.append("\nRisk: ").append(risk);
+        return out.toString();
+    }
+
+    private String compactToolLabel(String source) {
+        if (source == null || source.trim().isEmpty()) return "tool";
+        String s = source.trim().replace("Terminal output", "run_shell").replace("Web search results", "web_search");
+        return s.length() > 40 ? s.substring(0, 37) + "…" : s;
+    }
+
+    private LinearLayout.LayoutParams compactParams() {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.bottomMargin = dp(2);
+        return lp;
+    }
+
+    private void addCompactDivider(LinearLayout parent) {
+        View line = new View(this);
+        line.setBackgroundColor(DIVIDER);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1));
+        lp.topMargin = dp(2); lp.bottomMargin = dp(3);
+        parent.addView(line, lp);
     }
 
     private void addToolOutputCard(JSONObject item) {
@@ -474,6 +717,7 @@ public class AiAssistantActivity extends Activity {
         JSONObject chat = findChat(chatId);
         if (chat == null || action == null) return;
         String tool = action.optString("tool", action.optString("name", "run_shell"));
+        if (!"finish".equals(tool) && !"continue".equals(tool)) noProgressContinuations.put(chatId, 0);
         if (!"finish".equals(tool) && !"continue".equals(tool) && !AgentWorkspace.isToolEnabled(this, tool)) {
             appendChatMessage(chat, "assistant", "الأداة " + tool + " متوقفة حسب config.json؛ عدّل tools.enabled إذا تريد تفعيلها.");
             saveChats(); if (chatId.equals(activeChatId)) renderMessages(); return;
@@ -691,18 +935,23 @@ public class AiAssistantActivity extends Activity {
                 runOnUiThread(() -> {
                     String visible = result.replace("[TFM_SCREENSHOT]", "").replace("[REQUEST_SCREENSHOT]", "").trim();
                     boolean emptyAnswer = visible.isEmpty() && !result.startsWith("[تعذر");
+                    String streamedThinking = getStreamThinking(chatId, streamId);
+                    boolean thinkingOnly = emptyAnswer && !streamedThinking.trim().isEmpty();
                     JSONObject next = extractAgentAction(visible);
-                    if (emptyAnswer) visible = "وصل ملخص التفكير دون إجابة نهائية؛ أوقفنا هذا الدور بأمان بدل إعادة الطلب إلى ما لا نهاية. أرسل متابعة حتى يكمل الوكيل.";
+                    if (emptyAnswer && !thinkingOnly) visible = "الموديل ما رجّع نصًا أو ملخص تفكير قابلًا للاستخدام. توقّف هذا الدور بدون إعادة تلقائية؛ أعد المحاولة أو راجع النموذج.";
                     if (next == null && looksLikeAgentActionPayload(visible)) {
                         visible = "أوقفت دورة الوكيل لأن الموديل رجّع أداة غير صالحة أو أمرًا فارغًا. ما نفّذت أي أمر فارغ وما راح أعيد نفس الطلب تلقائيًا. أعد المحاولة أو غيّر النموذج إذا تكررت المشكلة.";
                     }
+                    try { JSONObject streamEntry = findStreamMessage(findChat(chatId), streamId); if (streamEntry != null && next != null) streamEntry.put("agent_action", next); } catch (Exception ignored) { }
                     visible = normalizeAgentActionForDisplay(visible, next);
                     finishStreamingAssistant(chatId, streamId, visible);
                     boolean requestedScreenshot = result.contains("[TFM_SCREENSHOT]") || result.contains("[REQUEST_SCREENSHOT]");
                     busy = false; if (sendButton != null) sendButton.setEnabled(true); updateHeader();
                     if (requestedScreenshot && !autoScreenshotUsed) { autoScreenshotUsed = true; beginAgentScreenshotCapture(chatId, finalProviderId, finalModel, finalEndpoint); return; }
                     if (isAgentRunCancelled(chatId)) return;
-                    if (emptyAnswer) { queueAgentContinuation(chatId); return; }
+                    if (thinkingOnly) { queueAgentContinuation(chatId, true); return; }
+                    if (emptyAnswer) { noProgressContinuations.put(chatId, 0); return; }
+                    if (next == null) noProgressContinuations.put(chatId, 0);
                     if (next != null && !"finish".equals(next.optString("tool", ""))
                             && (isSkillActivation(next) || isInternalAgentAction(next) || autoExecutionEnabled(chatId))) executeAgentAction(chatId, next, true);
                     // A plain-text response is a completed model turn, not an implicit request to call the API again.
@@ -729,22 +978,37 @@ public class AiAssistantActivity extends Activity {
         return null;
     }
 
-    private void appendStreamDelta(String chatId,String streamId,boolean thinking,String fragment) {
-        if(fragment==null || fragment.isEmpty())return;
+    private void appendStreamDelta(String chatId, String streamId, boolean thinking, String fragment) {
+        if (fragment == null || fragment.isEmpty()) return;
         handler.post(() -> {
-            JSONObject chat=findChat(chatId); JSONObject entry=findStreamMessage(chat,streamId); if(entry==null)return;
-            String key=thinking?"thinking":"text";
-            try{entry.put(key,entry.optString(key,"")+fragment);}catch(Exception ignored){}
-            StreamViews views=activeStreams.get(streamId);
-            if(views!=null){
-                if(thinking){views.thinking.setText(entry.optString("thinking",""));views.toggle.setText("ملخص التفكير · "+entry.optString("thinking","").length()+" حرف");}
-                else views.answer.setText(entry.optString("text",""));
+            JSONObject chat = findChat(chatId);
+            JSONObject entry = findStreamMessage(chat, streamId);
+            if (entry == null) return;
+            String key = thinking ? "thinking" : "text";
+            try { entry.put(key, entry.optString(key, "") + fragment); } catch (Exception ignored) { }
+            String accumulated = entry.optString(key, "");
+            StreamViews views = activeStreams.get(streamId);
+            if (views != null) {
+                if (thinking) {
+                    views.thinking.setText(accumulated);
+                    views.toggle.setVisibility(View.VISIBLE);
+                    views.toggle.setText("Thinking · " + accumulated.length() + " chars");
+                } else {
+                    boolean toolJson = looksLikeAgentActionPayload(accumulated);
+                    views.answer.setVisibility(accumulated.isEmpty() || toolJson ? View.GONE : View.VISIBLE);
+                    views.answer.setText(toolJson ? "جاري تجهيز استدعاء الأداة…" : accumulated);
+                }
             }
-            if(chatId.equals(activeChatId)){
-                if(rateLabel!=null)rateLabel.setText(thinking?"يصل ملخص التفكير من Gemini…":"الرد يصل تدريجيًا…");
-                if(messagesScroll!=null)messagesScroll.post(()->messagesScroll.fullScroll(View.FOCUS_DOWN));
+            if (chatId.equals(activeChatId)) {
+                if (rateLabel != null) rateLabel.setText(thinking ? "Thinking · ملخص التفكير يصل مباشرة…" : "الرد يصل مباشرة…");
+                if (messagesScroll != null) messagesScroll.post(() -> messagesScroll.fullScroll(View.FOCUS_DOWN));
             }
         });
+    }
+
+    private String getStreamThinking(String chatId, String streamId) {
+        JSONObject entry = findStreamMessage(findChat(chatId), streamId);
+        return entry == null ? "" : entry.optString("thinking", "");
     }
 
     private void finishStreamingAssistant(String chatId,String streamId,String result) {
@@ -849,15 +1113,22 @@ public class AiAssistantActivity extends Activity {
                 final String result = answer;
                 runOnUiThread(() -> {
                     String visible = result == null ? "" : result.trim();
+                    boolean emptyAnswer = visible.isEmpty() && (result == null || !result.startsWith("[لم يكتمل تحليل"));
+                    String streamedThinking = getStreamThinking(chatId, streamId);
+                    boolean thinkingOnly = emptyAnswer && !streamedThinking.trim().isEmpty();
                     JSONObject next = extractAgentAction(visible);
-                    if (visible.isEmpty()) visible = "لم يرجع الموديل نصًا؛ أوقفت هذا الدور بأمان بدل تكرار الطلب. أرسل متابعة أو راجع إعدادات المزوّد.";
+                    if (emptyAnswer && !thinkingOnly) visible = "الموديل ما رجّع نصًا أو ملخص تفكير قابلًا للاستخدام. توقّف هذا الدور بدون إعادة تلقائية؛ أرسل متابعة أو راجع النموذج.";
                     if (next == null && looksLikeAgentActionPayload(visible)) {
                         visible = "أوقفت دورة الوكيل لأن الموديل رجّع أداة غير صالحة أو أمرًا فارغًا. ما نفّذت أي أمر فارغ وما راح أعيد نفس الطلب تلقائيًا. أعد المحاولة أو غيّر النموذج إذا تكررت المشكلة.";
                     }
+                    try { JSONObject streamEntry = findStreamMessage(findChat(chatId), streamId); if (streamEntry != null && next != null) streamEntry.put("agent_action", next); } catch (Exception ignored) { }
                     visible = normalizeAgentActionForDisplay(visible, next);
                     finishStreamingAssistant(chatId, streamId, visible);
                     busy = false; if (sendButton != null) sendButton.setEnabled(true); updateHeader();
                     if (isAgentRunCancelled(chatId)) return;
+                    if (thinkingOnly) { queueAgentContinuation(chatId, true); return; }
+                    if (emptyAnswer) { noProgressContinuations.put(chatId, 0); return; }
+                    if (next == null) noProgressContinuations.put(chatId, 0);
                     if (next != null && !"finish".equals(next.optString("tool", ""))
                             && (isSkillActivation(next) || isInternalAgentAction(next) || autoExecutionEnabled(chatId))) executeAgentAction(chatId, next, true);
                     // Do not blindly retry a natural-language or malformed response. Explicit continue is required.
@@ -1014,51 +1285,39 @@ public class AiAssistantActivity extends Activity {
     }
 
     private void queueAgentContinuation(String chatId) {
+        queueAgentContinuation(chatId, false);
+    }
+
+    /** Continues a reasoning-only turn; the guard only stops repeated no-progress thinking, never total task steps. */
+    private void queueAgentContinuation(String chatId, boolean thinkingOnly) {
         if (isAgentRunCancelled(chatId)) return;
         JSONObject chat = findChat(chatId); if (chat == null) return;
+        if (thinkingOnly) {
+            int count = noProgressContinuations.containsKey(chatId) ? noProgressContinuations.get(chatId) + 1 : 1;
+            noProgressContinuations.put(chatId, count);
+            if (count >= 6) {
+                appendChatMessage(chat, "assistant", "أوقفت المتابعة لأن الموديل رجّع التفكير فقط 6 مرات متتالية بدون نص قابل للاستخدام أو أداة أو نتيجة جديدة. ماكو حد على عدد خطوات المهمة؛ هذا الحاجز يمنع استهلاك الطلبات داخل حلقة بلا تقدّم. غيّر النموذج أو أرسل متابعة جديدة.");
+                saveChats();
+                if (chatId.equals(activeChatId)) renderMessages();
+                return;
+            }
+        } else {
+            noProgressContinuations.put(chatId, 0);
+        }
         try {
             JSONArray messages = chat.optJSONArray("messages"); if (messages == null) messages = new JSONArray();
-            JSONObject control = msg("agent_control", "[Agent continuation control] The last response was not an explicit finish action. Continue the original task rather than repeating the progress report. Return exactly one valid JSON object: {\"tfm_action\":{...}}. Use finish only after the user's goal and verification are complete; otherwise choose the next useful tool action or continue. Do not repeat work already verified.");
-            messages.put(control); while (messages.length() > 80) messages.remove(0);
+            String instruction = thinkingOnly
+                    ? "[Agent continuation control] The previous provider turn produced a thinking summary but no answer text or tool call. This is a valid planning-only turn, not an error. Continue the original task now: choose the next useful tool/action and return one valid tfm_action, or return finish with a concise user-facing answer if the task is done. Do not repeat the same thinking summary. Do not invent a tool output."
+                    : "[Agent continuation control] The previous response was a progress update, not the end of the user's task. Continue from verified state. Return a useful next tool action or finish with the final user-facing answer. Do not repeat work already verified.";
+            messages.put(msg("agent_control", instruction));
+            while (messages.length() > 80) messages.remove(0);
             chat.put("messages", messages); saveChats();
         } catch (Exception ignored) { }
-        if (chatId.equals(activeChatId)) { if (rateLabel != null) rateLabel.setText("تقرير مرحلي؛ الوكيل يكمل المهمة…"); renderMessages(); }
+        if (chatId.equals(activeChatId)) {
+            if (rateLabel != null) rateLabel.setText(thinkingOnly ? "Thinking-only turn · الوكيل يختار الخطوة التالية…" : "تقرير مرحلي؛ الوكيل يكمل المهمة…");
+            renderMessages();
+        }
         autoAnalyzeCommandResult(chatId);
-    }
-
-    private void stopAgentRun() {
-        JSONObject chat = current(); if (chat == null) return;
-        String id = chat.optString("id", ""); cancelledAgentRuns.put(id, true);
-        Toast.makeText(this, "طلبنا إيقاف الوكيل بعد انتهاء الطلب أو الأمر الجاري؛ لن يبدأ خطوات متابعة جديدة.", Toast.LENGTH_LONG).show();
-    }
-
-    private boolean isInternalAgentAction(JSONObject action) {
-        if (action == null) return false;
-        String tool = action.optString("tool", action.optString("name", ""));
-        return "finish".equals(tool) || "continue".equals(tool) || "web_search".equals(tool)
-                || "save_memory".equals(tool) || "remember".equals(tool);
-    }
-
-    private String normalizeAgentActionForDisplay(String original, JSONObject action) {
-        if (action == null) return original;
-        String tool = action.optString("tool", action.optString("name", ""));
-        if ("finish".equals(tool)) return action.optString("message", action.optString("content", action.optString("result", "اكتملت المهمة.")));
-        if ("continue".equals(tool)) return action.optString("message", action.optString("status", action.optString("reason", "أكمل العمل بالخطوة التالية.")));
-        if ("web_search".equals(tool)) return "أبحث بالإنترنت عن: " + action.optString("query", "الموضوع المطلوب") + "\n" + action.optString("reason", "أتحقق من مصادر حديثة قبل إكمال الإجابة.");
-        if ("save_memory".equals(tool) || "remember".equals(tool)) return "أحفظ المعلومة في الذاكرة الدائمة ~/.TFM-setting/Memory.md حتى أستفيد منها لاحقًا.";
-        return original;
-    }
-
-    private void addAgentToolOutput(String chatId, String label, String output) {
-        JSONObject chat = findChat(chatId); if (chat == null) return;
-        try {
-            JSONArray messages = chat.optJSONArray("messages"); if (messages == null) messages = new JSONArray();
-            JSONObject event = msg("tool_output", output == null ? "" : output);
-            event.put("tool_label", label); event.put("display_path", label);
-            messages.put(event); while (messages.length() > 80) messages.remove(0);
-            chat.put("messages", messages); saveChats();
-            if (chatId.equals(activeChatId)) renderMessages();
-        } catch (Exception ignored) { }
     }
 
     private void runWebSearch(String chatId, String query) {

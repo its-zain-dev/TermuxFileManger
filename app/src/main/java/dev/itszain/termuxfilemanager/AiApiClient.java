@@ -111,9 +111,26 @@ public final class AiApiClient {
                 if (line.startsWith("data:")) {
                     sawData = true;
                     String data = line.substring(5).trim();
-                    if (data.equals("[DONE]")) continue;
-                    if (sseData.length() > 0) sseData.append('\n');
-                    sseData.append(data);
+                    if (data.equals("[DONE]")) {
+                        if (sseData.length() > 0) {
+                            emitStreamPayload(provider.type, sseData.toString(), listener, finalText);
+                            sseData.setLength(0);
+                        }
+                        continue;
+                    }
+                    if (data.isEmpty()) continue;
+                    // Providers normally emit one complete JSON object per SSE data line. Parse it now
+                    // rather than waiting for a blank line, so text/thinking reaches the UI immediately.
+                    if (isCompleteJsonObject(data) && sseData.length() == 0) {
+                        emitStreamPayload(provider.type, data, listener, finalText);
+                    } else {
+                        if (sseData.length() > 0) sseData.append('\n');
+                        sseData.append(data);
+                        if (isCompleteJsonObject(sseData.toString())) {
+                            emitStreamPayload(provider.type, sseData.toString(), listener, finalText);
+                            sseData.setLength(0);
+                        }
+                    }
                 } else if (line.trim().isEmpty() && sseData.length() > 0) {
                     emitStreamPayload(provider.type, sseData.toString(), listener, finalText);
                     sseData.setLength(0);
@@ -129,6 +146,12 @@ public final class AiApiClient {
             emitFullResponse(provider.type, result, listener, finalText);
         }
         return finalText.toString().trim();
+    }
+
+    private static boolean isCompleteJsonObject(String payload) {
+        if (payload == null || payload.trim().isEmpty()) return false;
+        try { new JSONObject(payload.trim()); return true; }
+        catch (Exception ignored) { return false; }
     }
 
     private static void emitStreamPayload(String providerType, String payload, StreamListener listener, StringBuilder output) {

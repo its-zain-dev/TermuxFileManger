@@ -17,8 +17,12 @@ import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.Settings;
+import android.text.Editable;
 import android.text.InputType;
+import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -29,6 +33,9 @@ import android.widget.BaseAdapter;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
+import android.widget.FrameLayout;
+import android.widget.GridView;
+import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.ScrollView;
@@ -40,30 +47,50 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class MainActivity extends Activity {
     private int BG, PANEL, PANEL_2, TEXT, MUTED, ACCENT, DANGER, DIVIDER;
+    private UiKit kit;
     private String lastThemeName = "midnight";
     private static final String TERMUX_HOME = "/data/data/com.termux/files/home";
     private static final String TERMUX_PREFIX = "/data/data/com.termux/files/usr";
+    private static final String ANDROID_STORAGE = "/storage/emulated/0";
     private static final String RUN_ACTION = "com.termux.RUN_COMMAND";
     private static final String RESULT_ACTION = CommandResultService.ACTION_RESULT;
     private static final String REQUEST_ID_KEY = CommandResultService.EXTRA_REQUEST_ID;
     private static final AtomicInteger NEXT_ID = new AtomicInteger((int) (System.currentTimeMillis() % 100000));
 
     private LinearLayout root;
-    private LinearLayout pathBar;
-    private EditText pathInput;
+    private LinearLayout breadcrumbBar;
+    private LinearLayout quickBar;
+    private EditText searchInput;
+    private TextView titleLabel;
+    private TextView subtitleLabel;
     private TextView connectionLabel;
     private TextView statusLabel;
-    private TextView hiddenButton;
+    private TextView hiddenChip;
+    private TextView sortChip;
+    private TextView viewChip;
+    private TextView countLabel;
+    private LinearLayout connectionHolder;
     private Button moreButton;
     private ListView listView;
-    private FileAdapter adapter;
+    private GridView gridView;
+    private FrameLayout listArea;
+    private LinearLayout emptyStateBox;
+    private FileAdapter listAdapter;
+    private FileAdapter gridAdapter;
+    private boolean gridMode = false;
+    private boolean suppressSearchWatcher = false;
+    private int sortMode = 0;
+    private final Handler searchHandler = new Handler(Looper.getMainLooper());
     private final ArrayList<JSONObject> files = new ArrayList<>();
     private final Map<Integer, ResultCallback> callbacks = new HashMap<>();
     private String currentPath = TERMUX_HOME;
@@ -71,6 +98,7 @@ public class MainActivity extends Activity {
     private boolean connected = false;
     private boolean searchMode = false;
     private String searchRoot = TERMUX_HOME;
+    private String lastQuery = "";
     private int nextOffset = 0;
     private boolean moreAvailable = false;
     private boolean receiverRegistered = false;
@@ -355,7 +383,9 @@ except Exception as e:
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        UiTheme palette = UiTheme.get(this); BG=palette.bg; PANEL=palette.panel; PANEL_2=palette.panel2; TEXT=palette.text; MUTED=palette.muted; ACCENT=palette.accent; DANGER=palette.danger; DIVIDER=Color.rgb(42, 53, 77); lastThemeName=UiTheme.getName(this);
+        kit = new UiKit(this);
+        UiTheme palette = UiTheme.get(this);
+        BG=palette.bg; PANEL=palette.panel; PANEL_2=palette.panel2; TEXT=palette.text; MUTED=palette.muted; ACCENT=palette.accent; DANGER=palette.danger; DIVIDER=Color.rgb(42, 53, 77); lastThemeName=UiTheme.getName(this);
         getWindow().setStatusBarColor(BG);
         getWindow().setNavigationBarColor(BG);
         UiTheme.applyWindow(this);
@@ -391,174 +421,437 @@ except Exception as e:
     @Override
     public void onBackPressed() {
         if (searchMode) {
-            searchMode = false;
-            loadDirectory(searchRoot, false);
+            clearSearch();
             return;
         }
         String parent = new java.io.File(currentPath).getParent();
-        if (parent != null && !parent.equals(currentPath)) loadDirectory(parent, false);
+        if (parent != null && !parent.equals(currentPath)) navigateTo(parent);
         else super.onBackPressed();
     }
 
     private void buildUi() {
+        FrameLayout frame = new FrameLayout(this);
+        frame.setBackgroundColor(kit.bg);
+        setContentView(frame);
+
         root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(BG);
-        root.setPadding(dp(16), dp(10), dp(16), dp(10));
-        setContentView(root);
+        root.setBackgroundColor(kit.bg);
+        frame.addView(root, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-        LinearLayout header = new LinearLayout(this);
-        header.setGravity(Gravity.CENTER_VERTICAL);
-        header.setOrientation(LinearLayout.HORIZONTAL);
-        LinearLayout heading = new LinearLayout(this);
-        heading.setOrientation(LinearLayout.VERTICAL);
-        heading.addView(text("TFM Workspace", 21, TEXT, true));
-        heading.addView(text("مساحة عمل Termux", 11, MUTED, false));
-        header.addView(heading, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        Button menu = button("⋮", PANEL, TEXT);
-        menu.setTextSize(22);
-        header.addView(menu, new LinearLayout.LayoutParams(dp(44), dp(44)));
-        menu.setOnClickListener(v -> new AlertDialog.Builder(this)
-                .setTitle("المزيد")
-                .setItems(new String[]{"جلسات Terminal", "مركز الأدوات", "إعدادات الذكاء الاصطناعي", "إعداد وربط Termux"},
-                        (dialog, which) -> {
-                            if (which == 0) startActivity(new Intent(this, TerminalSessionsActivity.class));
-                            else if (which == 1) startActivity(new Intent(this, ToolsActivity.class));
-                            else if (which == 2) startActivity(new Intent(this, AiSettingsActivity.class));
-                            else showHelpDialog(false);
-                        }).show());
-        root.addView(header);
+        buildTopBar();
+        buildPathBar();
+        buildQuickRow();
+        buildToolbar();
+        buildListArea();
+        buildBottomBar();
 
-        LinearLayout agentCard = new LinearLayout(this);
-        agentCard.setOrientation(LinearLayout.HORIZONTAL);
-        agentCard.setGravity(Gravity.CENTER_VERTICAL);
-        agentCard.setPadding(dp(14), dp(12), dp(12), dp(12));
-        agentCard.setBackground(round(PANEL_2, 16, ACCENT));
-        LinearLayout agentInfo = new LinearLayout(this);
-        agentInfo.setOrientation(LinearLayout.VERTICAL);
-        agentInfo.addView(text("AI Agent", 17, TEXT, true));
-        TextView agentDescription = text("يفحص المخرجات وينفّذ أدوات داخل Termux بعد موافقتك", 11, MUTED, false);
-        LinearLayout.LayoutParams sub = new LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT);
-        sub.topMargin = dp(3);
-        agentInfo.addView(agentDescription, sub);
-        agentCard.addView(agentInfo, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        Button openAgent = button("فتح الوكيل  ›", ACCENT, BG);
-        openAgent.setOnClickListener(v -> {
+        // Floating action button for creating folders and files.
+        Button fab = kit.primary("+");
+        fab.setTextSize(26);
+        fab.setElevation(kit.dp(8));
+        fab.setContentDescription("إنشاء ملف أو مجلد جديد");
+        fab.setOnClickListener(v -> showCreateMenu());
+        FrameLayout.LayoutParams fabLp = new FrameLayout.LayoutParams(kit.dp(56), kit.dp(56), Gravity.BOTTOM | Gravity.END);
+        fabLp.setMargins(0, 0, kit.dp(18), kit.dp(74));
+        frame.addView(fab, fabLp);
+
+        updatePathView();
+    }
+
+    private void buildTopBar() {
+        LinearLayout bar = new LinearLayout(this);
+        bar.setOrientation(LinearLayout.HORIZONTAL);
+        bar.setGravity(Gravity.CENTER_VERTICAL);
+        bar.setPadding(kit.dp(18), kit.dp(14), kit.dp(12), kit.dp(6));
+
+        LinearLayout titles = new LinearLayout(this);
+        titles.setOrientation(LinearLayout.VERTICAL);
+        titleLabel = kit.text("مدير الملفات", 24, kit.text, true);
+        titles.addView(titleLabel, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        subtitleLabel = kit.caption("مساحة عمل Termux");
+        LinearLayout.LayoutParams subtitleLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        subtitleLp.topMargin = kit.dp(3);
+        titles.addView(subtitleLabel, subtitleLp);
+        bar.addView(titles, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+
+        TextView agent = kit.chip("الوكيل", false);
+        agent.setTextColor(kit.accent);
+        agent.setPadding(kit.dp(14), kit.dp(8), kit.dp(14), kit.dp(8));
+        agent.setContentDescription("فتح وكيل الذكاء الاصطناعي");
+        agent.setOnClickListener(v -> {
             startActivity(new Intent(this, AiAssistantActivity.class));
             overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out);
         });
-        agentCard.addView(openAgent, new LinearLayout.LayoutParams(dp(108), dp(42)));
-        LinearLayout.LayoutParams agentLp = new LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT);
-        agentLp.topMargin = dp(10);
-        agentLp.bottomMargin = dp(10);
-        root.addView(agentCard, agentLp);
+        bar.addView(agent, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, kit.dp(36)));
 
-        connectionLabel = text("جارِ فحص اتصال Termux…", 11, MUTED, false);
-        connectionLabel.setPadding(dp(2), 0, 0, dp(7));
-        root.addView(connectionLabel);
+        Button menu = kit.iconButton("⋮", "خيارات إضافية");
+        menu.setOnClickListener(v -> showMainMenu());
+        LinearLayout.LayoutParams menuLp = new LinearLayout.LayoutParams(kit.dp(36), kit.dp(36));
+        menuLp.leftMargin = kit.dp(8);
+        bar.addView(menu, menuLp);
+        root.addView(bar);
 
-        pathBar = new LinearLayout(this);
-        pathBar.setGravity(Gravity.CENTER_VERTICAL);
-        pathInput = new EditText(this);
-        pathInput.setSingleLine(true);
-        pathInput.setTextColor(TEXT);
-        pathInput.setHintTextColor(MUTED);
-        pathInput.setTextSize(13);
-        pathInput.setHint("المسار الحالي أو ~/...");
-        pathInput.setPadding(dp(12), 0, dp(12), 0);
-        pathInput.setBackground(round(PANEL, 12, DIVIDER));
-        pathBar.addView(pathInput, new LinearLayout.LayoutParams(0, dp(46), 1));
-        Button go = button("فتح", PANEL_2, ACCENT);
-        go.setOnClickListener(v -> {
-            String path = pathInput.getText().toString().trim();
-            if (!path.isEmpty()) loadDirectory(path, false);
+        LinearLayout statusRow = new LinearLayout(this);
+        statusRow.setOrientation(LinearLayout.HORIZONTAL);
+        statusRow.setGravity(Gravity.CENTER_VERTICAL);
+        statusRow.setPadding(kit.dp(18), 0, kit.dp(16), 0);
+        connectionHolder = new LinearLayout(this);
+        statusRow.addView(connectionHolder, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        countLabel = kit.text("", 11.5f, kit.muted, false);
+        countLabel.setPadding(kit.dp(10), 0, 0, 0);
+        statusRow.addView(countLabel, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        root.addView(statusRow);
+    }
+
+    private void buildPathBar() {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(kit.dp(16), kit.dp(4), kit.dp(12), kit.dp(2));
+
+        HorizontalScrollView scroller = new HorizontalScrollView(this);
+        scroller.setHorizontalScrollBarEnabled(false);
+        scroller.setFillViewport(false);
+        breadcrumbBar = new LinearLayout(this);
+        breadcrumbBar.setOrientation(LinearLayout.HORIZONTAL);
+        breadcrumbBar.setGravity(Gravity.CENTER_VERTICAL);
+        scroller.addView(breadcrumbBar);
+        row.addView(scroller, new LinearLayout.LayoutParams(0, kit.dp(38), 1));
+
+        Button edit = kit.iconButton("✎", "كتابة مسار");
+        edit.setTextSize(15);
+        edit.setOnClickListener(v -> kit.promptDialog("انتقل إلى مسار", "اكتب المسار، مثل ~/projects", currentPath, "فتح", value -> {
+            if (!value.isEmpty()) navigateTo(value);
+        }));
+        LinearLayout.LayoutParams editLp = new LinearLayout.LayoutParams(kit.dp(36), kit.dp(36));
+        editLp.leftMargin = kit.dp(6);
+        row.addView(edit, editLp);
+        root.addView(row);
+    }
+
+    private void buildQuickRow() {
+        HorizontalScrollView scroller = new HorizontalScrollView(this);
+        scroller.setHorizontalScrollBarEnabled(false);
+        scroller.setPadding(kit.dp(16), kit.dp(2), kit.dp(16), kit.dp(2));
+        quickBar = new LinearLayout(this);
+        quickBar.setOrientation(LinearLayout.HORIZONTAL);
+        quickBar.setGravity(Gravity.CENTER_VERTICAL);
+        scroller.addView(quickBar);
+
+        addQuickChip("الرئيسية", TERMUX_HOME);
+        addQuickChip("PREFIX", TERMUX_PREFIX);
+        addQuickChip("التخزين", ANDROID_STORAGE);
+        addQuickChip("التنزيلات", ANDROID_STORAGE + "/Download");
+        root.addView(scroller, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, kit.dp(40)));
+    }
+
+    private void addQuickChip(String label, String path) {
+        TextView chip = kit.chip(label, false);
+        chip.setOnClickListener(v -> navigateTo(path));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, kit.dp(32));
+        lp.rightMargin = kit.dp(8);
+        quickBar.addView(chip, lp);
+    }
+
+    private void buildToolbar() {
+        LinearLayout searchRow = new LinearLayout(this);
+        searchRow.setOrientation(LinearLayout.HORIZONTAL);
+        searchRow.setGravity(Gravity.CENTER_VERTICAL);
+        searchRow.setPadding(kit.dp(16), kit.dp(8), kit.dp(16), kit.dp(2));
+
+        LinearLayout searchBox = new LinearLayout(this);
+        searchBox.setOrientation(LinearLayout.HORIZONTAL);
+        searchBox.setGravity(Gravity.CENTER_VERTICAL);
+        searchBox.setPadding(kit.dp(12), 0, kit.dp(10), 0);
+        searchBox.setBackground(kit.round(kit.panelAlt, 14, kit.outline));
+        TextView glyph = kit.text("⌕", 17, kit.muted, false);
+        glyph.setGravity(Gravity.CENTER);
+        searchBox.addView(glyph, new LinearLayout.LayoutParams(kit.dp(20), kit.dp(44)));
+
+        searchInput = new EditText(this);
+        searchInput.setTextColor(kit.text);
+        searchInput.setHintTextColor(kit.muted);
+        searchInput.setTextSize(13);
+        searchInput.setSingleLine(true);
+        searchInput.setBackgroundColor(Color.TRANSPARENT);
+        searchInput.setPadding(kit.dp(8), 0, kit.dp(4), 0);
+        searchInput.setHint("ابحث داخل هذا المجلد");
+        searchInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        searchInput.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH);
+        searchBox.addView(searchInput, new LinearLayout.LayoutParams(0, kit.dp(44), 1));
+        searchInput.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) { }
+            @Override public void afterTextChanged(Editable s) { if (!suppressSearchWatcher) scheduleSearch(s.toString()); }
         });
-        LinearLayout.LayoutParams goLp = new LinearLayout.LayoutParams(dp(58), dp(42));
-        goLp.leftMargin = dp(6);
-        pathBar.addView(go, goLp);
-        Button up = button("↑", PANEL, TEXT);
-        up.setTextSize(20);
-        up.setOnClickListener(v -> {
-            String parent = new java.io.File(currentPath).getParent();
-            if (parent != null) loadDirectory(parent, false);
+        searchInput.setOnEditorActionListener((v, actionId, event) -> {
+            runSearchNow(searchInput.getText().toString().trim());
+            return true;
         });
-        LinearLayout.LayoutParams upLp = new LinearLayout.LayoutParams(dp(42), dp(42));
-        upLp.leftMargin = dp(5);
-        pathBar.addView(up, upLp);
-        root.addView(pathBar);
+        searchRow.addView(searchBox, new LinearLayout.LayoutParams(0, kit.dp(44), 1));
+        root.addView(searchRow);
 
-        LinearLayout quick = new LinearLayout(this);
-        quick.setOrientation(LinearLayout.HORIZONTAL);
-        quick.setGravity(Gravity.CENTER_VERTICAL);
-        quick.addView(buttonSmall("HOME", () -> loadDirectory(TERMUX_HOME, false)), weightLp());
-        quick.addView(buttonSmall("PREFIX", () -> loadDirectory(TERMUX_PREFIX, false)), weightLp());
-        quick.addView(buttonSmall("التخزين", () -> loadDirectory("/storage/emulated/0", false)), weightLp());
-        root.addView(quick);
+        HorizontalScrollView chipScroll = new HorizontalScrollView(this);
+        chipScroll.setHorizontalScrollBarEnabled(false);
+        chipScroll.setPadding(kit.dp(16), kit.dp(6), kit.dp(16), kit.dp(2));
+        LinearLayout chipRow = new LinearLayout(this);
+        chipRow.setOrientation(LinearLayout.HORIZONTAL);
+        chipRow.setGravity(Gravity.CENTER_VERTICAL);
 
-        LinearLayout actions = new LinearLayout(this);
-        actions.setOrientation(LinearLayout.HORIZONTAL);
-        actions.setGravity(Gravity.CENTER_VERTICAL);
-        Button search = button("بحث", PANEL, TEXT);
-        search.setOnClickListener(v -> showSearchDialog());
-        actions.addView(search, new LinearLayout.LayoutParams(0, dp(42), 1));
-        hiddenButton = button(showHidden ? "المخفية ظاهرة" : "المخفية مخفية", PANEL, ACCENT);
-        hiddenButton.setOnClickListener(v -> {
+        hiddenChip = kit.chip("المخفية: ظاهرة", false);
+        hiddenChip.setOnClickListener(v -> {
             showHidden = !showHidden;
-            hiddenButton.setText(showHidden ? "المخفية ظاهرة" : "المخفية مخفية");
+            updateToolbarChips();
             loadDirectory(currentPath, false);
         });
-        LinearLayout.LayoutParams hiddenLp = new LinearLayout.LayoutParams(0, dp(42), 1.35f);
-        hiddenLp.setMargins(dp(6), 0, dp(6), 0);
-        actions.addView(hiddenButton, hiddenLp);
-        Button refresh = button("تحديث", PANEL, TEXT);
-        refresh.setOnClickListener(v -> loadDirectory(currentPath, false));
-        actions.addView(refresh, new LinearLayout.LayoutParams(0, dp(42), 1));
-        Button create = button("+", PANEL_2, ACCENT);
-        create.setTextSize(23);
-        create.setOnClickListener(v -> showCreateMenu());
-        LinearLayout.LayoutParams createLp = new LinearLayout.LayoutParams(dp(44), dp(42));
-        createLp.leftMargin = dp(6);
-        actions.addView(create, createLp);
-        LinearLayout.LayoutParams actionsLp = new LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT);
-        actionsLp.topMargin = dp(8);
-        root.addView(actions, actionsLp);
+        chipRow.addView(hiddenChip, chipLp());
 
-        TextView filesHeading = text("الملفات والمجلدات", 14, TEXT, true);
-        filesHeading.setPadding(dp(3), dp(10), 0, dp(5));
-        root.addView(filesHeading);
+        sortChip = kit.chip("الترتيب: الاسم", false);
+        sortChip.setOnClickListener(v -> showSortSheet());
+        chipRow.addView(sortChip, chipLp());
+
+        viewChip = kit.chip("العرض: قائمة", false);
+        viewChip.setOnClickListener(v -> toggleGridMode());
+        chipRow.addView(viewChip, chipLp());
+
+        chipScroll.addView(chipRow);
+        root.addView(chipScroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, kit.dp(42)));
+    }
+
+    private LinearLayout.LayoutParams chipLp() {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, kit.dp(30));
+        lp.rightMargin = kit.dp(8);
+        return lp;
+    }
+
+    private void updateToolbarChips() {
+        if (hiddenChip != null) hiddenChip.setText(showHidden ? "المخفية: ظاهرة" : "المخفية: مخفية");
+        if (sortChip != null) sortChip.setText("الترتيب: " + sortLabel());
+        if (viewChip != null) viewChip.setText("العرض: " + (gridMode ? "شبكة" : "قائمة"));
+    }
+
+    private String sortLabel() {
+        switch (sortMode) {
+            case 1: return "الحجم";
+            case 2: return "التاريخ";
+            case 3: return "النوع";
+            default: return "الاسم";
+        }
+    }
+
+    private void showSortSheet() {
+        final String[] labels = {"الاسم (أ - ي)", "الحجم (الأكبر أولًا)", "التاريخ (الأحدث أولًا)", "النوع (امتداد الملف)"};
+        kit.sheet("ترتيب العناصر", labels, index -> {
+            sortMode = index;
+            updateToolbarChips();
+            applySort();
+        });
+    }
+
+    private void toggleGridMode() {
+        gridMode = !gridMode;
+        updateToolbarChips();
+        if (gridMode) {
+            listView.setVisibility(View.GONE);
+            gridView.setVisibility(View.VISIBLE);
+        } else {
+            listView.setVisibility(View.VISIBLE);
+            gridView.setVisibility(View.GONE);
+        }
+    }
+
+    private void buildListArea() {
+        listArea = new FrameLayout(this);
+        listArea.setBackgroundColor(kit.bg);
 
         listView = new ListView(this);
-        listView.setDivider(new android.graphics.drawable.ColorDrawable(Color.rgb(34, 45, 69)));
-        listView.setDividerHeight(dp(1));
+        listView.setDivider(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
+        listView.setDividerHeight(kit.dp(8));
         listView.setCacheColorHint(Color.TRANSPARENT);
-        listView.setBackgroundColor(BG);
+        listView.setBackgroundColor(Color.TRANSPARENT);
         listView.setSelector(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
-        adapter = new FileAdapter();
-        listView.setAdapter(adapter);
+        listView.setClipToPadding(false);
+        listView.setPadding(kit.dp(10), kit.dp(4), kit.dp(10), kit.dp(12));
+        listAdapter = new FileAdapter(false);
+        listView.setAdapter(listAdapter);
         listView.setOnItemClickListener((parent, view, position, id) -> onFileClicked(files.get(position)));
         listView.setOnItemLongClickListener((parent, view, position, id) -> {
             openFileActions(files.get(position));
             return true;
         });
-        root.addView(listView, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
+        listArea.addView(listView, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
+        gridView = new GridView(this);
+        gridView.setNumColumns(2);
+        gridView.setHorizontalSpacing(kit.dp(10));
+        gridView.setVerticalSpacing(kit.dp(10));
+        gridView.setPadding(kit.dp(12), kit.dp(4), kit.dp(12), kit.dp(12));
+        gridView.setBackgroundColor(Color.TRANSPARENT);
+        gridView.setSelector(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
+        gridView.setStretchMode(GridView.STRETCH_COLUMN_WIDTH);
+        gridAdapter = new FileAdapter(true);
+        gridView.setAdapter(gridAdapter);
+        gridView.setOnItemClickListener((parent, view, position, id) -> onFileClicked(files.get(position)));
+        gridView.setOnItemLongClickListener((parent, view, position, id) -> {
+            openFileActions(files.get(position));
+            return true;
+        });
+        gridView.setVisibility(View.GONE);
+        listArea.addView(gridView, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        emptyStateBox = new LinearLayout(this);
+        emptyStateBox.setOrientation(LinearLayout.VERTICAL);
+        emptyStateBox.setVisibility(View.GONE);
+        listArea.addView(emptyStateBox, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        root.addView(listArea, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
+    }
+
+    private void buildBottomBar() {
         LinearLayout bottom = new LinearLayout(this);
+        bottom.setOrientation(LinearLayout.HORIZONTAL);
         bottom.setGravity(Gravity.CENTER_VERTICAL);
-        statusLabel = text("جاهز", 11, MUTED, false);
-        bottom.addView(statusLabel, new LinearLayout.LayoutParams(0, dp(38), 1));
-        moreButton = button("تحميل المزيد", PANEL_2, ACCENT);
+        bottom.setPadding(kit.dp(18), kit.dp(2), kit.dp(16), kit.dp(10));
+        statusLabel = kit.text("جاهز", 11.5f, kit.muted, false);
+        bottom.addView(statusLabel, new LinearLayout.LayoutParams(0, kit.dp(34), 1));
+        moreButton = kit.ghost("تحميل المزيد");
+        moreButton.setTextSize(12);
         moreButton.setVisibility(View.GONE);
         moreButton.setOnClickListener(v -> loadMore());
-        bottom.addView(moreButton, new LinearLayout.LayoutParams(dp(112), dp(36)));
+        bottom.addView(moreButton, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, kit.dp(32)));
         root.addView(bottom);
-        updatePathView();
+    }
+
+    private void rebuildBreadcrumbs() {
+        if (breadcrumbBar == null) return;
+        breadcrumbBar.removeAllViews();
+        List<String> labels = new ArrayList<>();
+        List<String> targets = new ArrayList<>();
+        String path = currentPath == null ? "" : currentPath;
+        if (path.startsWith(TERMUX_HOME)) {
+            labels.add("~");
+            targets.add(TERMUX_HOME);
+            String relative = path.substring(TERMUX_HOME.length());
+            if (relative.startsWith("/")) relative = relative.substring(1);
+            String accumulated = TERMUX_HOME;
+            if (!relative.isEmpty()) {
+                for (String segment : relative.split("/")) {
+                    if (segment.isEmpty()) continue;
+                    accumulated = accumulated + "/" + segment;
+                    labels.add(segment);
+                    targets.add(accumulated);
+                }
+            }
+        } else {
+            labels.add("/");
+            targets.add("/");
+            String accumulated = "";
+            for (String segment : path.split("/")) {
+                if (segment.isEmpty()) continue;
+                accumulated = accumulated + "/" + segment;
+                labels.add(segment);
+                targets.add(accumulated);
+            }
+        }
+        for (int i = 0; i < labels.size(); i++) {
+            final String target = targets.get(i);
+            final boolean last = i == labels.size() - 1;
+            TextView crumb = kit.chip(labels.get(i), last);
+            if (last) crumb.setTextColor(kit.text);
+            crumb.setOnClickListener(v -> navigateTo(target));
+            breadcrumbBar.addView(crumb, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, kit.dp(30)));
+            if (!last) {
+                TextView separator = kit.text("›", 13, kit.muted, false);
+                separator.setGravity(Gravity.CENTER);
+                breadcrumbBar.addView(separator, new LinearLayout.LayoutParams(kit.dp(14), kit.dp(30)));
+            }
+        }
     }
 
     private void updatePathView() {
-        if (pathInput != null && !searchMode) pathInput.setText(currentPath);
-        if (connectionLabel != null) {
-            connectionLabel.setText(connected ? "● متصل بـ Termux  •  " + (searchMode ? "نتائج البحث" : currentPath) : "○ غير متصل بـ Termux");
-            connectionLabel.setTextColor(connected ? ACCENT : MUTED);
+        if (titleLabel != null) titleLabel.setText(currentNameOf(currentPath));
+        if (subtitleLabel != null) subtitleLabel.setText(searchMode ? ("نتائج البحث داخل " + searchRoot) : currentPath);
+        if (connectionHolder != null) {
+            connectionHolder.removeAllViews();
+            connectionHolder.addView(kit.statusPill(connected ? "متصل بـ Termux" : "غير متصل", connected));
+        }
+        rebuildBreadcrumbs();
+        updateToolbarChips();
+        updateEmptyState();
+    }
+
+    private void updateEmptyState() {
+        if (emptyStateBox == null) return;
+        boolean empty = files.isEmpty() && !listingInProgress && connected;
+        emptyStateBox.removeAllViews();
+        if (!empty) {
+            emptyStateBox.setVisibility(View.GONE);
+            return;
+        }
+        String title = searchMode ? "ماكو نتائج مطابقة" : "المجلد فاضي";
+        String subtitle = searchMode
+                ? ("ما لقينا أي ملف يطابق «" + lastQuery + "» داخل هذا المجلد")
+                : "اضغط + لإنشاء ملف أو مجلد جديد، أو ارجع لمجلد آخر من المسار فوق.";
+        String action = searchMode ? "ارجع للمجلد" : "إنشاء عنصر";
+        emptyStateBox.addView(kit.emptyState(searchMode ? "⌕" : "▤", title, subtitle, action, () -> {
+            if (searchMode) clearSearch();
+            else showCreateMenu();
+        }));
+        emptyStateBox.setVisibility(View.VISIBLE);
+    }
+
+    private void refreshAdapters() {
+        if (listAdapter != null) listAdapter.notifyDataSetChanged();
+        if (gridAdapter != null) gridAdapter.notifyDataSetChanged();
+    }
+
+    private void applySort() {
+        Collections.sort(files, new Comparator<JSONObject>() {
+            @Override
+            public int compare(JSONObject left, JSONObject right) {
+                boolean leftDir = left.optBoolean("isDir", false);
+                boolean rightDir = right.optBoolean("isDir", false);
+                if (leftDir != rightDir) return leftDir ? -1 : 1;
+                if (sortMode == 1) {
+                    int bySize = Long.compare(right.optLong("size", 0), left.optLong("size", 0));
+                    if (bySize != 0) return bySize;
+                } else if (sortMode == 2) {
+                    int byDate = Long.compare(right.optLong("mtime", 0), left.optLong("mtime", 0));
+                    if (byDate != 0) return byDate;
+                } else if (sortMode == 3) {
+                    int byType = extensionOf(left).compareTo(extensionOf(right));
+                    if (byType != 0) return byType;
+                }
+                return left.optString("name", "").compareToIgnoreCase(right.optString("name", ""));
+            }
+        });
+        refreshAdapters();
+    }
+
+    private String extensionOf(JSONObject item) {
+        String name = item.optString("name", "");
+        int dot = name.lastIndexOf('.');
+        if (dot < 0 || dot == name.length() - 1) return item.optBoolean("isDir", false) ? "📁 مجلد" : "";
+        return name.substring(dot + 1).toLowerCase(java.util.Locale.ROOT);
+    }
+
+    private String currentNameOf(String path) {
+        if (path == null || path.isEmpty()) return "مدير الملفات";
+        if (path.equals(TERMUX_HOME)) return "الرئيسية";
+        if (path.equals(TERMUX_PREFIX)) return "PREFIX";
+        if (path.equals(ANDROID_STORAGE)) return "التخزين";
+        String name = new java.io.File(path).getName();
+        return name.isEmpty() ? path : name;
+    }
+
+    private String formatDate(long epochSeconds) {
+        if (epochSeconds <= 0) return "";
+        try {
+            return new java.text.SimpleDateFormat("d MMM HH:mm", java.util.Locale.getDefault())
+                    .format(new java.util.Date(epochSeconds * 1000L));
+        } catch (Exception e) {
+            return "";
         }
     }
 
@@ -586,7 +879,12 @@ except Exception as e:
             nextOffset = 0;
             moreAvailable = false;
             files.clear();
-            adapter.notifyDataSetChanged();
+            refreshAdapters();
+            searchHandler.removeCallbacksAndMessages(null);
+            lastQuery = "";
+            suppressSearchWatcher = true;
+            if (searchInput != null) searchInput.setText("");
+            suppressSearchWatcher = false;
         }
         updatePathView();
         setStatus("جاري قراءة الملفات…", MUTED);
@@ -621,11 +919,12 @@ except Exception as e:
             nextOffset = response.optInt("nextOffset", 0);
             moreAvailable = response.optBoolean("more", false);
             moreButton.setVisibility(moreAvailable ? View.VISIBLE : View.GONE);
-            adapter.notifyDataSetChanged();
+            applySort();
             animateListIn();
             updatePathView();
             int total = response.optInt("total", files.size());
             String note = response.optInt("metadataErrors", 0) > 0 ? " • بعض العناصر صلاحيتها محدودة" : "";
+            if (countLabel != null) countLabel.setText(files.size() + " معروض من " + total);
             setStatus(files.size() + " معروض من " + total + " عنصر" + note, MUTED);
         });
     }
@@ -633,6 +932,59 @@ except Exception as e:
     private void loadMore() {
         if (searchMode || !moreAvailable) return;
         loadDirectory(currentPath, true);
+    }
+
+    /** Debounced search so typing in the toolbar does not spam the Termux bridge. */
+    private void scheduleSearch(String query) {
+        searchHandler.removeCallbacksAndMessages(null);
+        final String value = query == null ? "" : query.trim();
+        if (value.isEmpty()) {
+            if (searchMode) clearSearch();
+            return;
+        }
+        searchHandler.postDelayed(() -> runSearchNow(value), 420);
+    }
+
+    private void runSearchNow(String query) {
+        if (query == null || query.isEmpty()) {
+            if (searchMode) clearSearch();
+            return;
+        }
+        lastQuery = query;
+        searchFiles(query);
+    }
+
+    private void clearSearch() {
+        searchHandler.removeCallbacksAndMessages(null);
+        lastQuery = "";
+        searchMode = false;
+        suppressSearchWatcher = true;
+        if (searchInput != null) searchInput.setText("");
+        suppressSearchWatcher = false;
+        loadDirectory(currentPath, false);
+    }
+
+    /** Navigating to another folder always drops the active search query. */
+    private void navigateTo(String path) {
+        searchHandler.removeCallbacksAndMessages(null);
+        lastQuery = "";
+        suppressSearchWatcher = true;
+        if (searchInput != null) searchInput.setText("");
+        suppressSearchWatcher = false;
+        loadDirectory(path, false);
+    }
+
+    private void showMainMenu() {
+        final String[] labels = {"جلسات Terminal", "مركز الأدوات", "إعدادات الذكاء الاصطناعي", "إعداد وربط Termux", "تحديث القائمة"};
+        kit.sheet("المزيد", labels, index -> {
+            switch (index) {
+                case 0: startActivity(new Intent(this, TerminalSessionsActivity.class)); break;
+                case 1: startActivity(new Intent(this, ToolsActivity.class)); break;
+                case 2: startActivity(new Intent(this, AiSettingsActivity.class)); break;
+                case 3: showHelpDialog(false); break;
+                default: navigateTo(currentPath); break;
+            }
+        });
     }
 
     private void searchFiles(String query) {
@@ -644,7 +996,7 @@ except Exception as e:
         searchMode = true;
         animateListOut();
         files.clear();
-        adapter.notifyDataSetChanged();
+        refreshAdapters();
         moreButton.setVisibility(View.GONE);
         setStatus("دا أبحث داخل " + rootPath + "…", MUTED);
         JSONObject payload = new JSONObject();
@@ -672,10 +1024,10 @@ except Exception as e:
                 }
             }
             moreAvailable = response.optBoolean("more", false);
-            adapter.notifyDataSetChanged();
+            applySort();
             animateListIn();
-            connectionLabel.setText("نتائج البحث داخل: " + rootPath);
-            connectionLabel.setTextColor(ACCENT);
+            updatePathView();
+            if (countLabel != null) countLabel.setText(files.size() + " نتيجة");
             setStatus("نتائج: " + files.size() + (moreAvailable ? " • أكو نتائج أكثر من الحد المعروض" : ""), MUTED);
         });
     }
@@ -738,12 +1090,11 @@ except Exception as e:
         choices.add("إعادة تسمية"); actions.add("rename");
         choices.add("تعديل الصلاحيات"); actions.add("chmod");
         if (!isDir) { choices.add("تشغيل في Termux"); actions.add("run"); }
+        choices.add("تشغيل بأمر مخصص"); actions.add("custom_run");
         choices.add("حذف نهائي"); actions.add("delete");
         String[] labels = choices.toArray(new String[0]);
         String[] ops = actions.toArray(new String[0]);
-        new AlertDialog.Builder(this)
-                .setTitle(file.optString("name", path))
-                .setItems(labels, (dialog, which) -> {
+        kit.sheet(file.optString("name", path), labels, which -> {
                     switch (ops[which]) {
                         case "edit": openTextFile(path); break;
                         case "stat": showInfo(path); break;
@@ -753,11 +1104,10 @@ except Exception as e:
                         case "rename": showRenameDialog(file); break;
                         case "chmod": showChmodDialog(file); break;
                         case "run": runFileInTermux(path); break;
+                        case "custom_run": showCustomRunDialog(path); break;
                         case "delete": confirmDelete(file); break;
                     }
-                })
-                .setNegativeButton("إلغاء", null)
-                .show();
+        });
     }
 
     private void openTextFile(String path) {
@@ -770,9 +1120,8 @@ except Exception as e:
                 return;
             }
             if (response.optBoolean("binary", false)) {
-                new AlertDialog.Builder(this).setTitle("ملف ثنائي")
-                        .setMessage("هذا الملف يبدو ثنائيًا وما ينفتح كمحرر نصوص.\nالحجم: " + humanSize(response.optLong("size", 0)) + "\n\nتقدر تستخدم تشغيل الملف أو فتحه داخل Termux حسب نوعه.")
-                        .setPositiveButton("حسنًا", null).show();
+                kit.infoDialog("ملف ثنائي",
+                        "هذا الملف يبدو ثنائيًا وما ينفتح كمحرر نصوص.\nالحجم: " + humanSize(response.optLong("size", 0)) + "\n\nتقدر تستخدم تشغيل الملف أو فتحه داخل Termux حسب نوعه.");
                 return;
             }
             showEditor(path, response.optString("text", ""));
@@ -780,16 +1129,17 @@ except Exception as e:
     }
 
     private void showEditor(String path, String originalText) {
-        LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.setPadding(dp(8), dp(4), dp(8), dp(4));
-        TextView note = text(path, 10, MUTED, false);
-        note.setPadding(dp(3), 0, dp(3), dp(7));
-        box.addView(note);
+        final android.app.Dialog dialog = new android.app.Dialog(this);
+        LinearLayout card = kit.dialogCard("محرر النصوص", null);
+
+        TextView note = kit.mono(path, 10.5f, kit.muted);
+        note.setPadding(0, 0, 0, kit.dp(8));
+        card.addView(note, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
         EditText editor = new EditText(this);
-        editor.setTextColor(TEXT);
-        editor.setHintTextColor(MUTED);
-        editor.setTextSize(13);
+        editor.setTextColor(kit.text);
+        editor.setHintTextColor(kit.muted);
+        editor.setTextSize(12.5f);
         editor.setGravity(Gravity.TOP | Gravity.START);
         editor.setTypeface(Typeface.MONOSPACE);
         editor.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
@@ -799,22 +1149,35 @@ except Exception as e:
         editor.setMaxLines(22);
         editor.setText(originalText);
         editor.setSelection(editor.length());
-        editor.setPadding(dp(10), dp(10), dp(10), dp(10));
-        editor.setBackground(round(PANEL, 9, Color.rgb(53, 68, 94)));
-        box.addView(editor, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(330)));
-        AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle("محرر النصوص")
-                .setView(box)
-                .setPositiveButton("حفظ", null)
-                .setNegativeButton("إلغاء", null)
-                .create();
-        dialog.setOnShowListener(v -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(btn -> {
-            String text = editor.getText().toString();
+        editor.setPadding(kit.dp(11), kit.dp(10), kit.dp(11), kit.dp(10));
+        editor.setBackground(kit.round(kit.panelAlt, 12, kit.outline));
+        LinearLayout.LayoutParams editorLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, kit.dp(320));
+        editorLp.topMargin = kit.dp(2);
+        card.addView(editor, editorLp);
+
+        LinearLayout actions = new LinearLayout(this);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        actions.setGravity(Gravity.CENTER_VERTICAL);
+        Button cancel = kit.ghost("إلغاء");
+        cancel.setOnClickListener(v -> dialog.dismiss());
+        actions.addView(cancel, new LinearLayout.LayoutParams(0, kit.dp(44), 1));
+        final Button save = kit.primary("حفظ");
+        LinearLayout.LayoutParams saveLp = new LinearLayout.LayoutParams(0, kit.dp(44), 1);
+        saveLp.leftMargin = kit.dp(8);
+        actions.addView(save, saveLp);
+        LinearLayout.LayoutParams actionsLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        actionsLp.topMargin = kit.dp(14);
+        card.addView(actions, actionsLp);
+
+        save.setOnClickListener(v -> {
+            String value = editor.getText().toString();
             JSONObject payload = new JSONObject();
-            try { payload.put("path", path); payload.put("text", text); } catch (JSONException ignored) { }
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(false);
+            try { payload.put("path", path); payload.put("text", value); } catch (JSONException ignored) { }
+            save.setEnabled(false);
+            save.setText("جارٍ الحفظ…");
             runBridge("write", payload, (response, error) -> {
-                dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(true);
+                save.setEnabled(true);
+                save.setText("حفظ");
                 if (error != null) showBridgeError(error);
                 else {
                     Toast.makeText(this, response.optString("message", "انحفظ الملف"), Toast.LENGTH_SHORT).show();
@@ -822,8 +1185,8 @@ except Exception as e:
                     if (!searchMode) loadDirectory(currentPath, false);
                 }
             });
-        }));
-        dialog.show();
+        });
+        kit.showCard(dialog, card);
     }
 
     private void showInfo(String path) {
@@ -843,24 +1206,17 @@ except Exception as e:
             msg.append("قراءة: ").append(item.optBoolean("readable") ? "نعم" : "لا").append("  كتابة: ").append(item.optBoolean("writable") ? "نعم" : "لا").append("  تنفيذ: ").append(item.optBoolean("executable") ? "نعم" : "لا").append("\n");
             if (!item.optString("linkTarget", "").isEmpty()) msg.append("الهدف: ").append(item.optString("linkTarget")).append("\n");
             msg.append("آخر تعديل: ").append(new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(new java.util.Date(item.optLong("mtime", 0) * 1000L)));
-            new AlertDialog.Builder(this).setTitle(item.optString("name", "معلومات الملف"))
-                    .setMessage(msg.toString()).setPositiveButton("إغلاق", null).show();
+            kit.infoDialog(item.optString("name", "معلومات الملف"), msg.toString());
         });
     }
 
     private void showDestinationDialog(JSONObject file, boolean move) {
-        EditText input = new EditText(this);
-        input.setSingleLine(true);
-        input.setText(currentPath);
-        input.setTextColor(TEXT);
-        input.setHintTextColor(MUTED);
-        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
-        new AlertDialog.Builder(this).setTitle(move ? "نقل العنصر" : "نسخ العنصر")
-                .setMessage("اكتب مسار المجلد الوجهة. اسم العنصر راح يبقى نفسه.")
-                .setView(input)
-                .setPositiveButton(move ? "نقل" : "نسخ", (dialog, which) -> {
+        kit.promptDialog(move ? "نقل العنصر" : "نسخ العنصر",
+                "مسار المجلد الوجهة — اسم العنصر راح يبقى نفسه",
+                currentPath, move ? "نقل" : "نسخ", value -> {
+                    if (value.isEmpty()) return;
                     JSONObject payload = new JSONObject();
-                    try { payload.put("path", file.optString("path")); payload.put("destDir", input.getText().toString().trim()); } catch (JSONException ignored) { }
+                    try { payload.put("path", file.optString("path")); payload.put("destDir", value); } catch (JSONException ignored) { }
                     runBridge(move ? "move" : "copy", payload, (response, error) -> {
                         if (error != null) showBridgeError(error);
                         else {
@@ -868,24 +1224,19 @@ except Exception as e:
                             loadDirectory(currentPath, false);
                         }
                     });
-                }).setNegativeButton("إلغاء", null).show();
+                });
     }
 
     private void showRenameDialog(JSONObject file) {
-        EditText input = new EditText(this);
-        input.setSingleLine(true);
-        input.setText(file.optString("name", ""));
-        input.setTextColor(TEXT);
-        new AlertDialog.Builder(this).setTitle("إعادة تسمية")
-                .setView(input)
-                .setPositiveButton("حفظ", (dialog, which) -> {
-                    JSONObject payload = new JSONObject();
-                    try { payload.put("path", file.optString("path")); payload.put("name", input.getText().toString().trim()); } catch (JSONException ignored) { }
-                    runBridge("rename", payload, (response, error) -> {
-                        if (error != null) showBridgeError(error);
-                        else { Toast.makeText(this, "تغير الاسم", Toast.LENGTH_SHORT).show(); loadDirectory(currentPath, false); }
-                    });
-                }).setNegativeButton("إلغاء", null).show();
+        kit.promptDialog("إعادة تسمية", "الاسم الجديد", file.optString("name", ""), "حفظ", value -> {
+            if (value.isEmpty()) return;
+            JSONObject payload = new JSONObject();
+            try { payload.put("path", file.optString("path")); payload.put("name", value); } catch (JSONException ignored) { }
+            runBridge("rename", payload, (response, error) -> {
+                if (error != null) showBridgeError(error);
+                else { Toast.makeText(this, "تغير الاسم", Toast.LENGTH_SHORT).show(); loadDirectory(currentPath, false); }
+            });
+        });
     }
 
     private void showChmodDialog(JSONObject file) {
@@ -901,68 +1252,79 @@ except Exception as e:
         for (int row = 0; row < 3; row++) {
             LinearLayout line = new LinearLayout(this);
             line.setGravity(Gravity.CENTER_VERTICAL);
-            TextView label = text(labels[row], 13, TEXT, true);
-            line.addView(label, new LinearLayout.LayoutParams(dp(73), dp(44)));
+            TextView label = kit.text(labels[row], 13, kit.text, true);
+            line.addView(label, new LinearLayout.LayoutParams(kit.dp(73), kit.dp(44)));
             for (int col = 0; col < 3; col++) {
                 CheckBox cb = new CheckBox(this);
                 cb.setText(bitLabels[col]);
                 cb.setTextSize(10);
-                cb.setTextColor(TEXT);
-                cb.setButtonTintList(android.content.res.ColorStateList.valueOf(ACCENT));
+                cb.setTextColor(kit.text);
+                cb.setButtonTintList(android.content.res.ColorStateList.valueOf(kit.accent));
                 cb.setChecked((mode & bits[row][col]) != 0);
                 checks[row][col] = cb;
                 line.addView(cb, new LinearLayout.LayoutParams(0, dp(44), 1));
             }
             content.addView(line);
         }
-        TextView warning = text("هذا يغيّر rwx فقط؛ الروابط الرمزية وبعض الملفات الخاصة قد ترفض chmod.", 10, MUTED, false);
+        TextView warning = kit.caption("هذا يغيّر rwx فقط؛ الروابط الرمزية وبعض الملفات الخاصة قد ترفض chmod.");
         warning.setPadding(dp(4), dp(7), dp(4), 0);
         content.addView(warning);
-        new AlertDialog.Builder(this).setTitle("صلاحيات الملف")
-                .setView(content)
-                .setPositiveButton("تطبيق", (dialog, which) -> {
-                    int newMode = 0;
-                    for (int row = 0; row < 3; row++) for (int col = 0; col < 3; col++) if (checks[row][col].isChecked()) newMode |= bits[row][col];
-                    JSONObject payload = new JSONObject();
-                    try { payload.put("path", file.optString("path")); payload.put("mode", String.format(java.util.Locale.ROOT, "%03o", newMode)); } catch (JSONException ignored) { }
-                    runBridge("chmod", payload, (response, error) -> {
-                        if (error != null) showBridgeError(error);
-                        else { Toast.makeText(this, "الصلاحيات الجديدة: " + response.optString("mode", ""), Toast.LENGTH_SHORT).show(); loadDirectory(currentPath, false); }
-                    });
-                }).setNegativeButton("إلغاء", null).show();
+        final android.app.Dialog dialog = new android.app.Dialog(this);
+        LinearLayout card = kit.dialogCard("صلاحيات الملف", null);
+        LinearLayout.LayoutParams contentLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        contentLp.topMargin = kit.dp(8);
+        card.addView(content, contentLp);
+        LinearLayout actions = new LinearLayout(this);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        actions.setGravity(Gravity.CENTER_VERTICAL);
+        Button cancel = kit.ghost("إلغاء");
+        cancel.setOnClickListener(v -> dialog.dismiss());
+        actions.addView(cancel, new LinearLayout.LayoutParams(0, kit.dp(44), 1));
+        Button apply = kit.primary("تطبيق");
+        LinearLayout.LayoutParams applyLp = new LinearLayout.LayoutParams(0, kit.dp(44), 1);
+        applyLp.leftMargin = kit.dp(8);
+        actions.addView(apply, applyLp);
+        LinearLayout.LayoutParams actionsLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        actionsLp.topMargin = kit.dp(14);
+        card.addView(actions, actionsLp);
+        apply.setOnClickListener(v -> {
+            int newMode = 0;
+            for (int row = 0; row < 3; row++) for (int col = 0; col < 3; col++) if (checks[row][col].isChecked()) newMode |= bits[row][col];
+            JSONObject payload = new JSONObject();
+            try { payload.put("path", file.optString("path")); payload.put("mode", String.format(java.util.Locale.ROOT, "%03o", newMode)); } catch (JSONException ignored) { }
+            dialog.dismiss();
+            runBridge("chmod", payload, (response, error) -> {
+                if (error != null) showBridgeError(error);
+                else { Toast.makeText(this, "الصلاحيات الجديدة: " + response.optString("mode", ""), Toast.LENGTH_SHORT).show(); loadDirectory(currentPath, false); }
+            });
+        });
+        kit.showCard(dialog, card);
     }
 
     private void confirmDelete(JSONObject file) {
-        String path = file.optString("path");
+        final String path = file.optString("path");
         boolean dir = file.optBoolean("isDir", false);
-        new AlertDialog.Builder(this).setTitle("تأكيد الحذف")
-                .setMessage("راح ينحذف " + (dir ? "المجلد وكل محتوياته" : "الملف") + " نهائيًا:\n\n" + path + "\n\nماكو سلة محذوفات داخل Termux.")
-                .setPositiveButton("حذف نهائي", (dialog, which) -> {
+        kit.confirmDialog("تأكيد الحذف",
+                "راح ينحذف " + (dir ? "المجلد وكل محتوياته" : "الملف") + " نهائيًا:\n\n" + path + "\n\nماكو سلة محذوفات داخل Termux.",
+                "حذف نهائي", () -> {
                     JSONObject payload = new JSONObject();
                     try { payload.put("path", path); } catch (JSONException ignored) { }
                     runBridge("delete", payload, (response, error) -> {
                         if (error != null) showBridgeError(error);
                         else { Toast.makeText(this, "انحذف العنصر", Toast.LENGTH_SHORT).show(); loadDirectory(currentPath, false); }
                     });
-                }).setNegativeButton("إلغاء", null).show();
+                });
     }
 
     private void showCreateMenu() {
-        new AlertDialog.Builder(this).setTitle("إنشاء عنصر جديد")
-                .setItems(new String[]{"مجلد جديد", "ملف فارغ جديد"}, (dialog, which) -> showCreateDialog(which == 0))
-                .setNegativeButton("إلغاء", null).show();
+        final String[] labels = {"مجلد جديد", "ملف فارغ جديد"};
+        kit.sheet("إنشاء عنصر جديد", labels, which -> showCreateDialog(which == 0));
     }
 
     private void showCreateDialog(boolean folder) {
-        EditText input = new EditText(this);
-        input.setSingleLine(true);
-        input.setHint(folder ? "اسم المجلد" : "اسم الملف، مثل script.py");
-        input.setTextColor(TEXT);
-        new AlertDialog.Builder(this).setTitle(folder ? "مجلد جديد" : "ملف جديد")
-                .setMessage("المكان: " + currentPath)
-                .setView(input)
-                .setPositiveButton("إنشاء", (dialog, which) -> {
-                    String name = input.getText().toString().trim();
+        kit.promptDialog(folder ? "مجلد جديد" : "ملف جديد",
+                (folder ? "اسم المجلد" : "اسم الملف، مثل script.py") + " — المكان: " + currentPath,
+                "", "إنشاء", name -> {
                     if (name.isEmpty() || name.contains("/")) { showMessage("اكتب اسم صالح بدون /."); return; }
                     JSONObject payload = new JSONObject();
                     try { payload.put("path", currentPath + "/" + name); } catch (JSONException ignored) { }
@@ -970,21 +1332,7 @@ except Exception as e:
                         if (error != null) showBridgeError(error);
                         else { Toast.makeText(this, response.optString("message", "تم الإنشاء"), Toast.LENGTH_SHORT).show(); loadDirectory(currentPath, false); }
                     });
-                }).setNegativeButton("إلغاء", null).show();
-    }
-
-    private void showSearchDialog() {
-        EditText input = new EditText(this);
-        input.setSingleLine(true);
-        input.setHint("جزء من اسم الملف أو المجلد");
-        input.setTextColor(TEXT);
-        new AlertDialog.Builder(this).setTitle("بحث داخل المجلد الحالي")
-                .setMessage("البحث يبدأ من: " + currentPath)
-                .setView(input)
-                .setPositiveButton("بحث", (dialog, which) -> {
-                    String q = input.getText().toString().trim();
-                    if (!q.isEmpty()) searchFiles(q);
-                }).setNegativeButton("إلغاء", null).show();
+                });
     }
 
     private void runFileInTermux(String path) {
@@ -1040,45 +1388,31 @@ except Exception as e:
                 break;
             }
             case "html": case "htm": case "pdf": case "png": case "jpg": case "jpeg": case "webp":
-                new AlertDialog.Builder(this).setTitle("فتح الملف")
-                        .setMessage("هذا النوع يُفتح كتطبيق/مستند، مو كأمر Shell. تقدر تفتح الملف بتطبيق أندرويد أو تستخدم أمرًا مخصصًا من مركز الأدوات.\n\n" + path)
-                        .setPositiveButton("نسخ المسار", (d, w) -> {
+                kit.confirmDialog("فتح الملف",
+                        "هذا النوع يُفتح كتطبيق/مستند، مو كأمر Shell. تقدر تفتح الملف بتطبيق أندرويد أو تستخدم أمرًا مخصصًا من مركز الأدوات.\n\n" + path,
+                        "نسخ المسار", () -> {
                             ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
                             cm.setPrimaryClip(ClipData.newPlainText("path", path));
                             Toast.makeText(this, "تم نسخ المسار", Toast.LENGTH_SHORT).show();
-                        }).setNegativeButton("إلغاء", null).show();
+                        });
                 return;
             default:
                 showCustomRunDialog(path);
                 return;
         }
         String fullCommand = "cd " + shellQuote(parentOf(path)) + " && " + command;
-        new AlertDialog.Builder(this).setTitle("تشغيل الملف")
-                .setMessage("المشغّل المقترح: " + command + "\n\nراح ينفتح Termux وينفّذ الأمر ضمن مجلد الملف. لازم تكون اللغة أو المترجم مثبتًا داخل Termux. شغّل بس ملفات تثق بيها.\n\n" + path)
-                .setPositiveButton("تشغيل", (dialog, which) -> launchTerminalCommand(fullCommand, parentOf(path), "تشغيل " + fileName))
-                .setNeutralButton("أمر مخصص…", (dialog, which) -> showCustomRunDialog(path))
-                .setNegativeButton("إلغاء", null).show();
+        kit.confirmDialog("تشغيل الملف",
+                "المشغّل المقترح: " + command + "\n\nراح ينفتح Termux وينفّذ الأمر ضمن مجلد الملف. لازم تكون اللغة أو المترجم مثبتًا داخل Termux. شغّل بس ملفات تثق بيها.\n\n" + path,
+                "تشغيل", () -> launchTerminalCommand(fullCommand, parentOf(path), "تشغيل " + fileName));
     }
 
     private void showCustomRunDialog(String path) {
         String fileName = new java.io.File(path).getName();
-        EditText input = new EditText(this);
-        input.setTextColor(TEXT);
-        input.setHintTextColor(MUTED);
-        input.setTypeface(Typeface.MONOSPACE);
-        input.setSingleLine(false);
-        input.setMinLines(2);
-        input.setText("./" + shellQuote(fileName));
-        input.setSelection(input.length());
-        input.setPadding(dp(10), dp(8), dp(10), dp(8));
-        input.setBackground(round(PANEL, 9, Color.rgb(53, 68, 94)));
-        new AlertDialog.Builder(this).setTitle("أمر تشغيل مخصص")
-                .setMessage("اكتب أمر أي لغة أو أداة مثبتة في Termux. المسار الحالي هو مجلد الملف. مثال: python 'script.py' أو node 'app.js' أو clang 'main.c' -o main && ./main")
-                .setView(input)
-                .setPositiveButton("تشغيل في Termux", (d, w) -> {
-                    String custom = input.getText().toString().trim();
+        kit.promptDialog("أمر تشغيل مخصص",
+                "المسار الحالي هو مجلد الملف. مثال: python 'script.py' أو node 'app.js'",
+                "./" + shellQuote(fileName), "تشغيل في Termux", custom -> {
                     if (!custom.isEmpty()) launchTerminalCommand("cd " + shellQuote(parentOf(path)) + " && " + custom, parentOf(path), "أمر مخصص من مدير الملفات");
-                }).setNegativeButton("إلغاء", null).show();
+                });
     }
 
     private void launchTerminalCommand(String commandText, String workdir, String label) {
@@ -1190,11 +1524,9 @@ except Exception as e:
     }
 
     private void showPermissionDialog() {
-        new AlertDialog.Builder(this).setTitle("إكمال ربط Termux")
-                .setMessage("التطبيق يحتاج إذن Run commands in Termux environment حتى يقرأ ويعدّل الملفات عن طريق Termux نفسه.\n\nمن إعدادات التطبيق افتح Permissions / Additional permissions وفعّل Run commands in Termux environment. ومن داخل Termux فعّل allow-external-apps=true، بعدها أعد تشغيل Termux.")
-                .setPositiveButton("فتح إعدادات التطبيق", (d, w) -> openAppSettings())
-                .setNeutralButton("طريقة الربط", (d, w) -> showHelpDialog(false))
-                .setNegativeButton("لاحقًا", null).show();
+        kit.confirmDialog("إكمال ربط Termux",
+                "التطبيق يحتاج إذن Run commands in Termux environment حتى يقرأ ويعدّل الملفات عن طريق Termux نفسه.\n\nمن إعدادات التطبيق افتح Permissions / Additional permissions وفعّل Run commands in Termux environment. ومن داخل Termux فعّل allow-external-apps=true، بعدها أعد تشغيل Termux.",
+                "فتح إعدادات التطبيق", this::openAppSettings);
     }
 
     private void showHelpDialog(boolean termuxMissing) {
@@ -1208,34 +1540,50 @@ except Exception as e:
                   "الأمر: mkdir -p ~/.termux; touch ~/.termux/termux.properties; if grep -q '^allow-external-apps=' ~/.termux/termux.properties; then sed -i 's/^allow-external-apps=.*/allow-external-apps=true/' ~/.termux/termux.properties; else echo 'allow-external-apps=true' >> ~/.termux/termux.properties; fi\n\n" +
                   "تثبيت Python مطلوب داخل Termux: pkg install python\n\n" +
                   "ملاحظة: يعرض الملفات المخفية مثل .bashrc و .termux افتراضيًا. يظل الوصول محكومًا بصلاحيات أندرويد وملفات المستخدم؛ ماكو وصول root تلقائي.";
-        LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.setPadding(dp(8), dp(4), dp(8), 0);
-        TextView text = text(body, 13, TEXT, false);
-        text.setGravity(Gravity.TOP | Gravity.START);
-        text.setPadding(dp(5), dp(7), dp(5), dp(7));
+
+        final android.app.Dialog dialog = new android.app.Dialog(this);
+        LinearLayout card = kit.dialogCard(termuxMissing ? "Termux غير مثبت" : "إعداد الربط", null);
+
         ScrollView scroll = new ScrollView(this);
-        scroll.addView(text);
-        box.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(300)));
-        AlertDialog dialog = new AlertDialog.Builder(this).setTitle(termuxMissing ? "Termux غير مثبت" : "إعداد الربط")
-                .setView(box)
-                .setPositiveButton(termuxMissing ? "إغلاق" : "نسخ أمر الإعداد", null)
-                .setNeutralButton("إعدادات التطبيق", null)
-                .setNegativeButton("إغلاق", null).create();
-        dialog.setOnShowListener(v -> {
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(btn -> {
-                if (termuxMissing) { dialog.dismiss(); return; }
-                String setup = "mkdir -p ~/.termux; touch ~/.termux/termux.properties; if grep -q '^allow-external-apps=' ~/.termux/termux.properties; then sed -i 's/^allow-external-apps=.*/allow-external-apps=true/' ~/.termux/termux.properties; else echo 'allow-external-apps=true' >> ~/.termux/termux.properties; fi; pkg install -y python";
-                ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
-                clipboard.setPrimaryClip(ClipData.newPlainText("Termux File Manager setup", setup));
-                Toast.makeText(this, "انسخنا أمر الإعداد. افتح Termux والصقه ونفّذه.", Toast.LENGTH_LONG).show();
-                Intent launch = getPackageManager().getLaunchIntentForPackage("com.termux");
-                if (launch != null) startActivity(launch);
-                dialog.dismiss();
-            });
-            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(btn -> { dialog.dismiss(); openAppSettings(); });
+        TextView bodyView = kit.text(body, 12.5f, kit.text, false);
+        bodyView.setGravity(Gravity.TOP | Gravity.START);
+        bodyView.setLineSpacing(kit.dp(2), 1f);
+        scroll.addView(bodyView);
+        LinearLayout.LayoutParams scrollLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, kit.dp(260));
+        scrollLp.topMargin = kit.dp(6);
+        card.addView(scroll, scrollLp);
+
+        LinearLayout actions = new LinearLayout(this);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        actions.setGravity(Gravity.CENTER_VERTICAL);
+        Button settings = kit.ghost("إعدادات التطبيق");
+        settings.setOnClickListener(v -> {
+            dialog.dismiss();
+            openAppSettings();
         });
-        dialog.show();
+        actions.addView(settings, new LinearLayout.LayoutParams(0, kit.dp(44), 1));
+        Button copy = kit.primary(termuxMissing ? "إغلاق" : "نسخ أمر الإعداد");
+        LinearLayout.LayoutParams copyLp = new LinearLayout.LayoutParams(0, kit.dp(44), 1);
+        copyLp.leftMargin = kit.dp(8);
+        actions.addView(copy, copyLp);
+        LinearLayout.LayoutParams actionsLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        actionsLp.topMargin = kit.dp(14);
+        card.addView(actions, actionsLp);
+
+        copy.setOnClickListener(v -> {
+            if (termuxMissing) {
+                dialog.dismiss();
+                return;
+            }
+            String setup = "mkdir -p ~/.termux; touch ~/.termux/termux.properties; if grep -q '^allow-external-apps=' ~/.termux/termux.properties; then sed -i 's/^allow-external-apps=.*/allow-external-apps=true/' ~/.termux/termux.properties; else echo 'allow-external-apps=true' >> ~/.termux/termux.properties; fi; pkg install -y python";
+            ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+            clipboard.setPrimaryClip(ClipData.newPlainText("Termux File Manager setup", setup));
+            Toast.makeText(this, "انسخنا أمر الإعداد. افتح Termux والصقه ونفّذه.", Toast.LENGTH_LONG).show();
+            Intent launch = getPackageManager().getLaunchIntentForPackage("com.termux");
+            if (launch != null) startActivity(launch);
+            dialog.dismiss();
+        });
+        kit.showCard(dialog, card);
     }
 
     private void openAppSettings() {
@@ -1251,16 +1599,15 @@ except Exception as e:
         if (message == null || message.trim().isEmpty()) message = "حدث خطأ غير معروف.";
         String lower = message.toLowerCase(java.util.Locale.ROOT);
         boolean setupIssue = lower.contains("external") || lower.contains("permission") || lower.contains("run_command") || lower.contains("run commands") || lower.contains("not allowed");
-        AlertDialog.Builder builder = new AlertDialog.Builder(this)
-                .setTitle("تعذر تنفيذ العملية")
-                .setMessage(message)
-                .setPositiveButton("حسنًا", null);
-        if (setupIssue) builder.setNeutralButton("إعداد الربط", (d, w) -> showHelpDialog(false));
-        builder.show();
+        if (setupIssue) {
+            kit.confirmDialog("تعذر تنفيذ العملية", message, "إعداد الربط", () -> showHelpDialog(false));
+            return;
+        }
+        kit.infoDialog("تعذر تنفيذ العملية", message);
     }
 
     private void showMessage(String message) {
-        new AlertDialog.Builder(this).setMessage(message).setPositiveButton("حسنًا", null).show();
+        kit.infoDialog(null, message);
     }
 
     private String humanSize(long bytes) {
@@ -1270,7 +1617,17 @@ except Exception as e:
         return String.format(java.util.Locale.ROOT, "%.2f GB", bytes / (1024.0 * 1024.0 * 1024.0));
     }
 
+    /**
+     * Renders one file entry either as a comfortable list row or as a grid card.
+     * Both modes share the same data source and the same metadata rules.
+     */
     private class FileAdapter extends BaseAdapter {
+        private final boolean grid;
+
+        FileAdapter(boolean grid) {
+            this.grid = grid;
+        }
+
         @Override public int getCount() { return files.size(); }
         @Override public Object getItem(int position) { return files.get(position); }
         @Override public long getItemId(int position) { return position; }
@@ -1278,50 +1635,138 @@ except Exception as e:
         @Override
         public View getView(int position, View convertView, ViewGroup parent) {
             JSONObject item = files.get(position);
+            if (item == null) return convertView;
+            return grid ? gridCell(item, convertView) : listRow(item, convertView);
+        }
+
+        private View listRow(JSONObject item, View convertView) {
             LinearLayout row;
-            if (convertView instanceof LinearLayout) row = (LinearLayout) convertView;
-            else {
+            TextView icon;
+            TextView name;
+            TextView meta;
+            View tile;
+            if (convertView instanceof LinearLayout && convertView.getTag() instanceof Object[]) {
+                row = (LinearLayout) convertView;
+                Object[] fields = (Object[]) row.getTag();
+                icon = (TextView) fields[0];
+                name = (TextView) fields[1];
+                meta = (TextView) fields[2];
+                tile = (View) fields[3];
+            } else {
                 row = new LinearLayout(MainActivity.this);
                 row.setOrientation(LinearLayout.HORIZONTAL);
                 row.setGravity(Gravity.CENTER_VERTICAL);
-                row.setPadding(dp(8), dp(6), dp(4), dp(6));
-                TextView icon = text("", 22, ACCENT, true);
+                row.setPadding(kit.dp(12), kit.dp(9), kit.dp(8), kit.dp(9));
+                row.setBackground(kit.interactive(kit.panel, 16, kit.outline));
+
+                FrameLayout iconTile = new FrameLayout(MainActivity.this);
+                icon = kit.text("", 17, kit.accent, true);
                 icon.setGravity(Gravity.CENTER);
-                row.addView(icon, new LinearLayout.LayoutParams(dp(42), dp(50)));
+                iconTile.addView(icon, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+                row.addView(iconTile, new LinearLayout.LayoutParams(kit.dp(40), kit.dp(40)));
+
                 LinearLayout texts = new LinearLayout(MainActivity.this);
                 texts.setOrientation(LinearLayout.VERTICAL);
                 texts.setGravity(Gravity.CENTER_VERTICAL);
-                texts.setPadding(dp(8), 0, dp(4), 0);
-                TextView name = text("", 14, TEXT, true);
+                name = kit.text("", 14.5f, kit.text, true);
                 name.setSingleLine(true);
                 name.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);
-                TextView meta = text("", 10, MUTED, false);
+                texts.addView(name, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+                meta = kit.text("", 11, kit.muted, false);
                 meta.setSingleLine(true);
-                texts.addView(name, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(25)));
-                texts.addView(meta, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(21)));
-                row.addView(texts, new LinearLayout.LayoutParams(0, dp(50), 1));
-                TextView arrow = text("⋮", 21, MUTED, true);
-                arrow.setGravity(Gravity.CENTER);
-                row.addView(arrow, new LinearLayout.LayoutParams(dp(26), dp(44)));
-                row.setTag(new TextView[]{icon, name, meta});
+                meta.setPadding(0, kit.dp(3), 0, 0);
+                texts.addView(meta, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+                LinearLayout.LayoutParams textsLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1);
+                textsLp.leftMargin = kit.dp(12);
+                row.addView(texts, textsLp);
+
+                TextView chevron = kit.text("›", 22, kit.muted, false);
+                chevron.setGravity(Gravity.CENTER);
+                row.addView(chevron, new LinearLayout.LayoutParams(kit.dp(24), kit.dp(40)));
+
+                tile = iconTile;
+                row.setTag(new Object[]{icon, name, meta, iconTile});
             }
-            TextView[] fields = (TextView[]) row.getTag();
+            bindEntry(item, icon, name, meta, tile, true);
+            return row;
+        }
+
+        private View gridCell(JSONObject item, View convertView) {
+            LinearLayout cell;
+            TextView icon;
+            TextView name;
+            TextView meta;
+            View tile;
+            if (convertView instanceof LinearLayout && convertView.getTag() instanceof Object[]) {
+                cell = (LinearLayout) convertView;
+                Object[] fields = (Object[]) cell.getTag();
+                icon = (TextView) fields[0];
+                name = (TextView) fields[1];
+                meta = (TextView) fields[2];
+                tile = (View) fields[3];
+            } else {
+                cell = new LinearLayout(MainActivity.this);
+                cell.setOrientation(LinearLayout.VERTICAL);
+                cell.setGravity(Gravity.CENTER_HORIZONTAL);
+                cell.setPadding(kit.dp(10), kit.dp(14), kit.dp(10), kit.dp(12));
+                cell.setBackground(kit.round(kit.panel, 18, kit.outline));
+
+                FrameLayout iconTile = new FrameLayout(MainActivity.this);
+                icon = kit.text("", 21, kit.accent, true);
+                icon.setGravity(Gravity.CENTER);
+                iconTile.addView(icon, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+                LinearLayout.LayoutParams tileLp = new LinearLayout.LayoutParams(kit.dp(46), kit.dp(46));
+                tileLp.bottomMargin = kit.dp(10);
+                cell.addView(iconTile, tileLp);
+
+                name = kit.text("", 13, kit.text, true);
+                name.setGravity(Gravity.CENTER);
+                name.setMaxLines(2);
+                name.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);
+                cell.addView(name, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+                meta = kit.text("", 10.5f, kit.muted, false);
+                meta.setGravity(Gravity.CENTER);
+                meta.setSingleLine(true);
+                meta.setPadding(0, kit.dp(4), 0, 0);
+                cell.addView(meta, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+                tile = iconTile;
+                cell.setTag(new Object[]{icon, name, meta, iconTile});
+            }
+            bindEntry(item, icon, name, meta, tile, false);
+            return cell;
+        }
+
+        /** Shared binding so list rows and grid cards always describe the entry the same way. */
+        private void bindEntry(JSONObject item, TextView icon, TextView name, TextView meta, View tile, boolean withDate) {
             String kind = item.optString("kind", "file");
             boolean dir = item.optBoolean("isDir", false);
             boolean hidden = item.optBoolean("hidden", false);
-            fields[0].setText(dir ? "▰" : (item.optBoolean("isLink", false) ? "↗" : (hidden ? "·" : "▤")));
-            fields[0].setTextColor(dir ? ACCENT : (hidden ? MUTED : Color.rgb(164, 188, 255)));
-            fields[1].setText(item.optString("name", "(بدون اسم)") + (hidden ? "  ·" : ""));
-            StringBuilder meta = new StringBuilder();
-            if (dir) meta.append("مجلد");
-            else if ("symlink".equals(kind)) meta.append("رابط رمزي");
-            else if ("unknown".equals(kind)) meta.append("غير قابل للقراءة");
-            else meta.append(humanSize(item.optLong("size", 0)));
-            meta.append("   •   ").append(item.optString("mode", "????"));
-            if (searchMode) meta.append("   •   ").append(item.optString("path", ""));
-            fields[2].setText(meta.toString());
-            row.setBackgroundColor(position % 2 == 0 ? BG : Color.rgb(13, 20, 38));
-            return row;
+            boolean link = item.optBoolean("isLink", false);
+
+            String glyph = dir ? "▰" : (link ? "↗" : (hidden ? "·" : "▤"));
+            icon.setText(glyph);
+            int tileColor = dir ? kit.accentSoft : kit.panelAlt;
+            tile.setBackground(kit.round(tileColor, 14));
+            int iconColor = dir ? kit.accent : (hidden ? kit.muted : kit.blend(kit.accent, kit.bg, 0.42f));
+            icon.setTextColor(iconColor);
+
+            String label = item.optString("name", "(بدون اسم)");
+            name.setText(hidden ? label + "  ·" : label);
+
+            StringBuilder description = new StringBuilder();
+            if (dir) description.append("مجلد");
+            else if (link) description.append("رابط رمزي");
+            else if ("unknown".equals(kind)) description.append("غير قابل للقراءة");
+            else description.append(humanSize(item.optLong("size", 0)));
+            description.append("  ·  ").append(item.optString("mode", "????"));
+            if (withDate) {
+                String stamp = formatDate(item.optLong("mtime", 0));
+                if (!stamp.isEmpty()) description.append("  ·  ").append(stamp);
+            }
+            if (searchMode) description.append("\n").append(item.optString("path", ""));
+            meta.setText(description.toString());
         }
     }
 }

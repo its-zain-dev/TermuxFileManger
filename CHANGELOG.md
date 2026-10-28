@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.0
+
+- Redesigned the entire app UI on top of a new shared design system (`UiKit`): one spacing/radius/typography scale, ripple feedback, cards, chips, bottom sheets and dialogs shared by every screen.
+- Rebuilt the file manager screen: large-title header with a live Termux connection pill, breadcrumb path navigation, quick-access chips (home / PREFIX / storage / downloads), inline debounced search, sort modes (name / size / date / type), list and grid view modes, card-style rows with icon tiles and metadata, a floating create button, and a real empty state.
+- Rebuilt the AI assistant and agent console: chat identity header, provider / session / auto-execution chips, live busy status pill, a welcome panel with ready-made starting points, and a per-run step timeline (thinking → tool call → tool output → answer) with expandable details.
+- Agent tool approval now presents the risk level, working directory and the exact command in a code block before anything is executed.
+- Replaced plain list dialogs with themed bottom sheets and form dialogs with themed card dialogs across the file manager, AI settings, tools center and terminal sessions.
+- No changes to the Termux bridge, the AI providers, the agent approval flow or the file operations themselves.
+- Incremented app version to 0.4.0 / versionCode 4.
+
 ## 0.3.0
 
 - Added a single, understated AI Assistant entry point and persistent multi-chat UI.

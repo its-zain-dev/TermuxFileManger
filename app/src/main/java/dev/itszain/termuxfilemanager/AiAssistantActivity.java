@@ -47,7 +47,7 @@ import java.util.regex.Pattern;
 public class AiAssistantActivity extends Activity {
     private UiTheme theme; private String lastThemeName="midnight"; private int BG,PANEL,PANEL2,TEXT,MUTED,ACCENT,DANGER,DIVIDER;
     private JSONArray chats,sessions; private String activeChatId="",attachedImage=""; private Spinner chatsSpinner,providerSpinner,terminalSpinner; private TextView modelLabel,rateLabel,attachmentLabel; private LinearLayout messagesBox; private ScrollView messagesScroll; private EditText input; private Button sendButton; private boolean receiverRegistered=false; private boolean busy=false; private boolean updatingSpinners=false;
-    private final ExecutorService worker=Executors.newFixedThreadPool(3); private final Handler handler=new Handler(Looper.getMainLooper()); private final Map<Integer,String> commandChats=new HashMap<>(); private final Map<Integer,Boolean> agentCommandRequests=new HashMap<>(); private final Map<Integer,PopupCommand> popupCommands=new HashMap<>(); private final Map<Integer,Runnable> workspaceSyncCallbacks=new HashMap<>(); private final Map<String,Boolean> cancelledAgentRuns=new HashMap<>(); private final Map<String,StreamViews> activeStreams=new HashMap<>(); private boolean autoScreenshotUsed=false;
+    private final ExecutorService worker=Executors.newFixedThreadPool(3); private final Handler handler=new Handler(Looper.getMainLooper()); private final Map<Integer,String> commandChats=new HashMap<>(); private final Map<Integer,Boolean> agentCommandRequests=new HashMap<>(); private final Map<Integer,PopupCommand> popupCommands=new HashMap<>(); private final Map<Integer,Runnable> workspaceSyncCallbacks=new HashMap<>(); private final Map<String,Boolean> cancelledAgentRuns=new HashMap<>(); private final Map<String,Integer> noProgressContinuations=new HashMap<>(); private final Map<String,StreamViews> activeStreams=new HashMap<>(); private boolean autoScreenshotUsed=false;
     private static final class StreamViews {
         final TextView answer, thinking; final Button toggle; final View thinkingBody;
         StreamViews(TextView answer, TextView thinking, Button toggle, View thinkingBody) { this.answer=answer; this.thinking=thinking; this.toggle=toggle; this.thinkingBody=thinkingBody; }
@@ -71,6 +71,7 @@ public class AiAssistantActivity extends Activity {
             String chatId=commandChats.remove(id);if(chatId==null)return;
             boolean agentRequest=agentCommandRequests.remove(id)!=null;
             JSONObject chat=findChat(chatId);if(chat==null)return;
+            if (agentRequest) noProgressContinuations.put(chatId, 0);
             try{JSONArray m=chat.optJSONArray("messages");if(m==null)m=new JSONArray();JSONObject event=msg("tool_output",output);event.put("tool_label","Terminal output");event.put("display_path",extractReadingPath(chat));m.put(event);while(m.length()>80)m.remove(0);chat.put("messages",m);saveChats();if(chatId.equals(activeChatId))renderMessages();}catch(Exception ignored){}
             if(agentRequest){
                 if(!busy) autoAnalyzeCommandResult(chatId);
@@ -368,8 +369,47 @@ public class AiAssistantActivity extends Activity {
         return null;
     }
 
-    private JSONObject parseAgentActionCandidate(String candidate){
-        try{JSONObject root=new JSONObject(candidate.trim());return root.optJSONObject("tfm_action");}catch(Exception ignored){return null;}
+    private JSONObject parseAgentActionCandidate(String candidate) {
+        try {
+            JSONObject root = new JSONObject(candidate.trim());
+            JSONObject action = root.optJSONObject("tfm_action");
+            if (action == null) return null;
+            String tool = action.optString("tool", action.optString("name", "")).trim();
+            if (tool.isEmpty()) return null;
+            if ("run_shell".equals(tool) || "shell".equals(tool) || "run_command".equals(tool)) {
+                if (agentCommand(action).trim().isEmpty()) return null;
+            } else if ("web_search".equals(tool)) {
+                JSONObject args = action.optJSONObject("arguments");
+                String query = action.optString("query", "").trim();
+                if (query.isEmpty() && args != null) query = args.optString("query", args.optString("q", "")).trim();
+                if (query.isEmpty()) return null;
+            } else if ("save_memory".equals(tool) || "remember".equals(tool)) {
+                JSONObject args = action.optJSONObject("arguments");
+                String content = action.optString("content", action.optString("memory", action.optString("text", ""))).trim();
+                if (content.isEmpty() && args != null) content = args.optString("content", args.optString("text", "")).trim();
+                if (content.isEmpty()) return null;
+            } else if ("install_skill".equals(tool)) {
+                JSONObject args = action.optJSONObject("arguments");
+                String url = action.optString("url", action.optString("source", "")).trim();
+                if (url.isEmpty() && args != null) url = args.optString("url", args.optString("source", "")).trim();
+                if (!url.startsWith("https://")) return null;
+            } else if ("activate_skill".equals(tool) || "use_skill".equals(tool)) {
+                JSONObject args = action.optJSONObject("arguments");
+                String skill = action.optString("skill", action.optString("name", "")).trim();
+                if (skill.isEmpty() && args != null) skill = args.optString("skill", args.optString("name", "")).trim();
+                if (skill.isEmpty()) return null;
+            } else if (!"continue".equals(tool) && !"finish".equals(tool)) {
+                return null;
+            }
+            return action;
+        } catch (Exception ignored) { return null; }
+    }
+
+    private boolean looksLikeAgentActionPayload(String source) {
+        if (source == null) return false;
+        String value = source.trim();
+        return (value.startsWith("{") || value.startsWith("```"))
+                && (value.contains("tfm_action") || value.contains("\"tool\""));
     }
 
     private String agentCommand(JSONObject action){
@@ -445,9 +485,28 @@ public class AiAssistantActivity extends Activity {
         }
         if ("finish".equals(tool)) return;
         if ("continue".equals(tool)) {
+            int stagnant = noProgressContinuations.containsKey(chatId) ? noProgressContinuations.get(chatId) : 0;
+            if (stagnant >= 2) {
+                cancelledAgentRuns.put(chatId, true);
+                appendChatMessage(chat, "assistant", "أوقفت الوكيل لأنّه كرر طلب المتابعة بدون تنفيذ أداة أو جلب معلومة جديدة. ماكو حد عام لعدد الخطوات؛ هذا حاجز يمنع الدوران بلا تقدّم. أرسل طلب متابعة جديد حتى تبدأ دورة جديدة.");
+                saveChats();
+                if (chatId.equals(activeChatId)) renderMessages();
+                if (sendButton != null) sendButton.setEnabled(true);
+                busy = false;
+                return;
+            }
+            noProgressContinuations.put(chatId, stagnant + 1);
+            try {
+                JSONArray messages = chat.optJSONArray("messages"); if (messages == null) messages = new JSONArray();
+                String interim = action.optString("message", action.optString("status", action.optString("reason", ""))).trim();
+                JSONObject control = msg("agent_control", "[Explicit continuation requested] " + interim
+                        + "\nContinue the original task now. Do not repeat the progress report. Take a different useful action or finish honestly. A repeated continue without new tool output is a loop.");
+                messages.put(control); while (messages.length() > 80) messages.remove(0); chat.put("messages", messages); saveChats();
+            } catch (Exception ignored) { }
             if (!busy && !isAgentRunCancelled(chatId)) autoAnalyzeCommandResult(chatId);
             return;
         }
+        noProgressContinuations.put(chatId, 0);
         if ("web_search".equals(tool)) {
             JSONObject searchArgs = action.optJSONObject("arguments");
             String query = action.optString("query", "").trim();
@@ -567,6 +626,7 @@ public class AiAssistantActivity extends Activity {
         attachmentLabel.setText("ماكو صورة مرفقة"); attachmentLabel.setVisibility(View.GONE); attachmentLabel.setVisibility(View.GONE); input.setText("");
         String chatId = chat.optString("id");
         cancelledAgentRuns.put(chatId, false);
+        noProgressContinuations.put(chatId, 0);
         appendChatMessage(chat, "user", userText);
         if (!expanded.equals(userText)) {
             try { JSONArray saved = chat.optJSONArray("messages"); JSONObject last = saved == null ? null : saved.optJSONObject(saved.length() - 1); if (last != null) last.put("expanded_prompt", expanded); } catch (Exception ignored) { }
@@ -632,7 +692,10 @@ public class AiAssistantActivity extends Activity {
                     String visible = result.replace("[TFM_SCREENSHOT]", "").replace("[REQUEST_SCREENSHOT]", "").trim();
                     boolean emptyAnswer = visible.isEmpty() && !result.startsWith("[تعذر");
                     JSONObject next = extractAgentAction(visible);
-                    if (emptyAnswer) visible = "وصل ملخص التفكير دون إجابة نهائية؛ أتابع التحقق من نتيجة الموديل بدل اعتبار المهمة منتهية.";
+                    if (emptyAnswer) visible = "وصل ملخص التفكير دون إجابة نهائية؛ أوقفنا هذا الدور بأمان بدل إعادة الطلب إلى ما لا نهاية. أرسل متابعة حتى يكمل الوكيل.";
+                    if (next == null && looksLikeAgentActionPayload(visible)) {
+                        visible = "أوقفت دورة الوكيل لأن الموديل رجّع أداة غير صالحة أو أمرًا فارغًا. ما نفّذت أي أمر فارغ وما راح أعيد نفس الطلب تلقائيًا. أعد المحاولة أو غيّر النموذج إذا تكررت المشكلة.";
+                    }
                     visible = normalizeAgentActionForDisplay(visible, next);
                     finishStreamingAssistant(chatId, streamId, visible);
                     boolean requestedScreenshot = result.contains("[TFM_SCREENSHOT]") || result.contains("[REQUEST_SCREENSHOT]");
@@ -642,7 +705,8 @@ public class AiAssistantActivity extends Activity {
                     if (emptyAnswer) { queueAgentContinuation(chatId); return; }
                     if (next != null && !"finish".equals(next.optString("tool", ""))
                             && (isSkillActivation(next) || isInternalAgentAction(next) || autoExecutionEnabled(chatId))) executeAgentAction(chatId, next, true);
-                    else if (next == null && !result.startsWith("[تعذر")) queueAgentContinuation(chatId);
+                    // A plain-text response is a completed model turn, not an implicit request to call the API again.
+                    // Continuation must be explicit via tfm_action.continue; this prevents runaway loops.
                 });
             });
         });
@@ -786,14 +850,17 @@ public class AiAssistantActivity extends Activity {
                 runOnUiThread(() -> {
                     String visible = result == null ? "" : result.trim();
                     JSONObject next = extractAgentAction(visible);
-                    if (visible.isEmpty()) visible = "لم يرجع الموديل نصًا نهائيًا أو أداة؛ ما أعتبر المهمة مكتملة. راجع إعدادات المزوّد أو أرسل متابعة.";
+                    if (visible.isEmpty()) visible = "لم يرجع الموديل نصًا؛ أوقفت هذا الدور بأمان بدل تكرار الطلب. أرسل متابعة أو راجع إعدادات المزوّد.";
+                    if (next == null && looksLikeAgentActionPayload(visible)) {
+                        visible = "أوقفت دورة الوكيل لأن الموديل رجّع أداة غير صالحة أو أمرًا فارغًا. ما نفّذت أي أمر فارغ وما راح أعيد نفس الطلب تلقائيًا. أعد المحاولة أو غيّر النموذج إذا تكررت المشكلة.";
+                    }
                     visible = normalizeAgentActionForDisplay(visible, next);
                     finishStreamingAssistant(chatId, streamId, visible);
                     busy = false; if (sendButton != null) sendButton.setEnabled(true); updateHeader();
                     if (isAgentRunCancelled(chatId)) return;
                     if (next != null && !"finish".equals(next.optString("tool", ""))
                             && (isSkillActivation(next) || isInternalAgentAction(next) || autoExecutionEnabled(chatId))) executeAgentAction(chatId, next, true);
-                    else if (next == null && !result.startsWith("[لم يكتمل تحليل")) queueAgentContinuation(chatId);
+                    // Do not blindly retry a natural-language or malformed response. Explicit continue is required.
                 });
             });
         });

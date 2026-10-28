@@ -2,6 +2,9 @@ plugins {
     id 'com.android.application'
 }
 
+def tfmReleaseKeystorePath = System.getenv('TFM_RELEASE_KEYSTORE_PATH')
+def tfmReleaseSigningEnabled = tfmReleaseKeystorePath != null && !tfmReleaseKeystorePath.trim().isEmpty()
+
 android {
     namespace 'dev.itszain.termuxfilemanager'
     compileSdk 35
@@ -12,6 +15,25 @@ android {
         targetSdk 32
         versionCode 3
         versionName '0.3.0'
+    }
+
+    if (tfmReleaseSigningEnabled) {
+        signingConfigs {
+            release {
+                storeFile file(tfmReleaseKeystorePath)
+                storePassword System.getenv('TFM_RELEASE_STORE_PASSWORD')
+                keyAlias System.getenv('TFM_RELEASE_KEY_ALIAS')
+                keyPassword System.getenv('TFM_RELEASE_KEY_PASSWORD')
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            if (tfmReleaseSigningEnabled) {
+                signingConfig signingConfigs.release
+            }
+        }
     }
 
     compileOptions {

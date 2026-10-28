@@ -1,33 +1,118 @@
-name: Android APK
+name: Android Release Build
 
 on:
   push:
+    branches: [main]
   pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  build:
+  release-build:
+    name: Build Android Release APK
     runs-on: ubuntu-latest
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
-      - name: Set up Java
-        uses: actions/setup-java@v4
+        uses: actions/checkout@v6
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
+
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: '8.9'
-      - name: Build debug APK
-        run: gradle --no-daemon assembleDebug
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
+
+      - name: Configure optional persistent release signing
+        id: signing
+        shell: bash
+        env:
+          TFM_KEYSTORE_B64: ${{ secrets.TFM_RELEASE_KEYSTORE_BASE64 }}
+          TFM_STORE_PASSWORD: ${{ secrets.TFM_RELEASE_STORE_PASSWORD }}
+          TFM_KEY_ALIAS: ${{ secrets.TFM_RELEASE_KEY_ALIAS }}
+          TFM_KEY_PASSWORD: ${{ secrets.TFM_RELEASE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$TFM_KEYSTORE_B64" ]]; then
+            if [[ -z "$TFM_STORE_PASSWORD" || -z "$TFM_KEY_ALIAS" || -z "$TFM_KEY_PASSWORD" ]]; then
+              echo "Keystore signing secret exists, but one or more other signing secrets are missing." >&2
+              exit 1
+            fi
+            KEYSTORE_PATH="$RUNNER_TEMP/tfm-release-keystore.jks"
+            printf '%s' "$TFM_KEYSTORE_B64" | base64 --decode > "$KEYSTORE_PATH"
+            test -s "$KEYSTORE_PATH"
+            {
+              echo "TFM_RELEASE_KEYSTORE_PATH=$KEYSTORE_PATH"
+              echo "TFM_RELEASE_STORE_PASSWORD=$TFM_STORE_PASSWORD"
+              echo "TFM_RELEASE_KEY_ALIAS=$TFM_KEY_ALIAS"
+              echo "TFM_RELEASE_KEY_PASSWORD=$TFM_KEY_PASSWORD"
+            } >> "$GITHUB_ENV"
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            echo "Persistent release signing is configured."
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "No signing keystore configured; the Release APK will be unsigned."
+          fi
+
+      - name: Build Release variant only
+        run: gradle --no-daemon clean assembleRelease
+
+      - name: Prepare APK and SHA-256 checksum
+        if: github.event_name != 'pull_request'
+        id: assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(sed -nE "s/.*versionName[[:space:]]+['\"]([^'\"]+)['\"].*/\1/p" app/build.gradle | head -n 1)"
+          VERSION="${VERSION:-unknown}"
+          RELEASE_DIR="$RUNNER_TEMP/tfm-release-assets"
+          mkdir -p "$RELEASE_DIR"
+          if [[ -f app/build/outputs/apk/release/app-release.apk ]]; then
+            SOURCE_APK="app/build/outputs/apk/release/app-release.apk"
+            SIGNING_LABEL="signed"
+          elif [[ -f app/build/outputs/apk/release/app-release-unsigned.apk ]]; then
+            SOURCE_APK="app/build/outputs/apk/release/app-release-unsigned.apk"
+            SIGNING_LABEL="unsigned"
+          else
+            echo "No Release APK found under app/build/outputs/apk/release/." >&2
+            find app/build/outputs/apk -maxdepth 4 -type f -print || true
+            exit 1
+          fi
+          APK_NAME="TermuxFileManager-${VERSION}-${SIGNING_LABEL}.apk"
+          cp "$SOURCE_APK" "$RELEASE_DIR/$APK_NAME"
+          (cd "$RELEASE_DIR" && sha256sum "$APK_NAME" > "$APK_NAME.sha256")
+          echo "apk=$RELEASE_DIR/$APK_NAME" >> "$GITHUB_OUTPUT"
+          echo "checksum=$RELEASE_DIR/$APK_NAME.sha256" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "signing=$SIGNING_LABEL" >> "$GITHUB_OUTPUT"
+          echo "Prepared $APK_NAME ($SIGNING_LABEL)."
+
+      - name: Publish GitHub Release
+        if: github.event_name != 'pull_request'
+        uses: softprops/action-gh-release@v3
         with:
-          name: TermuxFileManager-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
+          tag_name: autobuild-${{ github.run_number }}-${{ github.run_attempt }}-${{ github.sha }}
+          name: TFM ${{ steps.assets.outputs.version }} · Build #${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            ${{ steps.assets.outputs.apk }}
+            ${{ steps.assets.outputs.checksum }}
+          body: |
+            ## Termux File Manager — automated Android Release build
+
+            - **Variant:** Release (`assembleRelease`; no Debug APK is built or uploaded).
+            - **App version:** ${{ steps.assets.outputs.version }}
+            - **Signing:** ${{ steps.assets.outputs.signing }}
+            - **Commit:** `${{ github.sha }}`
+
+            Download the APK and its `.sha256` checksum below. Unsigned APKs must be signed before installation. For stable install-and-update behavior, configure the persistent release-signing secrets in the repository Actions settings.

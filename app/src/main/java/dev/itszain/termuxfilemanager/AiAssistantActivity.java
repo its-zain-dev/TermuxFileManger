@@ -46,7 +46,7 @@ import java.util.regex.Pattern;
 /** Multi-chat AI coding assistant linked to saved Termux work sessions. */
 public class AiAssistantActivity extends Activity {
     private UiTheme theme; private String lastThemeName="midnight"; private int BG,PANEL,PANEL2,TEXT,MUTED,ACCENT,DANGER,DIVIDER;
-    private JSONArray chats,sessions; private String activeChatId="",attachedImage=""; private Spinner chatsSpinner,providerSpinner,terminalSpinner; private TextView modelLabel,rateLabel,attachmentLabel; private LinearLayout messagesBox; private ScrollView messagesScroll; private EditText input; private Button sendButton; private boolean receiverRegistered=false; private boolean busy=false; private boolean updatingSpinners=false;
+    private JSONArray chats,sessions; private String activeChatId="",attachedImage="",attachedText="",attachedName=""; private Spinner chatsSpinner,providerSpinner,terminalSpinner; private TextView modelLabel,rateLabel,attachmentLabel; private LinearLayout messagesBox; private ScrollView messagesScroll; private EditText input; private Button sendButton; private boolean receiverRegistered=false; private boolean activityDestroyed=false; private boolean busy=false; private boolean updatingSpinners=false; private static final int REQUEST_ATTACHMENT_FILE=7861;
     private final ExecutorService worker=Executors.newFixedThreadPool(3); private final Handler handler=new Handler(Looper.getMainLooper()); private final Map<Integer,String> commandChats=new HashMap<>(); private final Map<Integer,Boolean> agentCommandRequests=new HashMap<>(); private final Map<Integer,PopupCommand> popupCommands=new HashMap<>(); private final Map<Integer,Runnable> workspaceSyncCallbacks=new HashMap<>(); private final Map<String,Boolean> cancelledAgentRuns=new HashMap<>(); private final Map<String,Integer> noProgressContinuations=new HashMap<>(); private final Map<String,StreamViews> activeStreams=new HashMap<>(); private boolean autoScreenshotUsed=false;
     private static final class StreamViews {
         final TextView answer, thinking; final Button toggle; final View thinkingBody;
@@ -55,6 +55,13 @@ public class AiAssistantActivity extends Activity {
     private static final class PopupCommand { final TextView output; final String sessionId; PopupCommand(TextView output,String sessionId){this.output=output;this.sessionId=sessionId;} }
     private final BroadcastReceiver resultReceiver=new BroadcastReceiver(){
         @Override public void onReceive(Context c,Intent i){
+            if (AgentBackgroundService.ACTION_COMPLETE.equals(i.getAction())) {
+                if (activityDestroyed) {
+                    if (receiverRegistered) { try { unregisterReceiver(resultReceiver); } catch (Exception ignored) { } receiverRegistered=false; }
+                    worker.shutdown();
+                }
+                return;
+            }
             int id=i.getIntExtra(CommandResultService.EXTRA_REQUEST_ID,-1);
             String stdout=i.getStringExtra("stdout"),stderr=i.getStringExtra("stderr");
             int exit=i.getIntExtra("exit_code",0),err=i.getIntExtra("err_code",-1);
@@ -85,8 +92,18 @@ public class AiAssistantActivity extends Activity {
     private final BroadcastReceiver screenshotReceiver=new BroadcastReceiver(){
         @Override public void onReceive(Context c,Intent i){maybeSubmitPendingScreenshot();}
     };
-    @Override public void onCreate(Bundle b){super.onCreate(b);initTheme();UiTheme.applyWindow(this);getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);chats=AiSecureStore.loadArray(this,AiSecureStore.CHATS,"items");sessions=AiSecureStore.loadArray(this,AiSecureStore.SESSIONS,"items");activeChatId=AiSecureStore.settings(this).getString("active_ai_chat","");if(chats.length()==0)newChat(false);if(findChat(activeChatId)==null)activeChatId=chats.optJSONObject(0).optString("id");build();IntentFilter f=new IntentFilter(CommandResultService.ACTION_RESULT);IntentFilter sf=new IntentFilter(ScreenCaptureService.ACTION_SCREENSHOT_SAVED);if(Build.VERSION.SDK_INT>=33){registerReceiver(resultReceiver,f,Context.RECEIVER_NOT_EXPORTED);registerReceiver(screenshotReceiver,sf,Context.RECEIVER_NOT_EXPORTED);}else{registerReceiver(resultReceiver,f);registerReceiver(screenshotReceiver,sf);}receiverRegistered=true;syncAgentWorkspace(() -> { });}
-    @Override protected void onDestroy(){if(receiverRegistered){try{unregisterReceiver(resultReceiver);}catch(Exception ignored){}try{unregisterReceiver(screenshotReceiver);}catch(Exception ignored){}}worker.shutdownNow();super.onDestroy();}
+    @Override public void onCreate(Bundle b){super.onCreate(b);initTheme();UiTheme.applyWindow(this);getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);chats=AiSecureStore.loadArray(this,AiSecureStore.CHATS,"items");sessions=AiSecureStore.loadArray(this,AiSecureStore.SESSIONS,"items");activeChatId=AiSecureStore.settings(this).getString("active_ai_chat","");if(chats.length()==0)newChat(false);if(findChat(activeChatId)==null)activeChatId=chats.optJSONObject(0).optString("id");build();IntentFilter f=new IntentFilter(CommandResultService.ACTION_RESULT);f.addAction(AgentBackgroundService.ACTION_COMPLETE);IntentFilter sf=new IntentFilter(ScreenCaptureService.ACTION_SCREENSHOT_SAVED);if(Build.VERSION.SDK_INT>=33){registerReceiver(resultReceiver,f,Context.RECEIVER_NOT_EXPORTED);registerReceiver(screenshotReceiver,sf,Context.RECEIVER_NOT_EXPORTED);}else{registerReceiver(resultReceiver,f);registerReceiver(screenshotReceiver,sf);}receiverRegistered=true;syncAgentWorkspace(() -> { });}
+    @Override protected void onDestroy(){
+        activityDestroyed=true;
+        boolean backgroundRun=AgentBackgroundService.isActive(this);
+        if(receiverRegistered){
+            if(!backgroundRun){try{unregisterReceiver(resultReceiver);}catch(Exception ignored){}receiverRegistered=false;}
+            try{unregisterReceiver(screenshotReceiver);}catch(Exception ignored){}
+        }
+        if(!backgroundRun)worker.shutdownNow();
+        super.onDestroy();
+    }
+    @Override protected void onPause(){AgentBackgroundService.setAppBackground(this,true);super.onPause();}
     private void initTheme(){lastThemeName=UiTheme.getName(this);theme=UiTheme.get(this);BG=theme.bg;PANEL=theme.panel;PANEL2=theme.panel2;TEXT=theme.text;MUTED=theme.muted;ACCENT=theme.accent;DANGER=theme.danger;DIVIDER=theme.divider;}
     private JSONObject current(){return findChat(activeChatId);} private JSONObject findChat(String id){return AiSecureStore.findById(chats,id);}
     private JSONObject msg(String role,String text){JSONObject o=new JSONObject();try{o.put("role",role);o.put("text",text);o.put("time",System.currentTimeMillis());}catch(Exception ignored){}return o;}
@@ -157,13 +174,18 @@ public class AiAssistantActivity extends Activity {
         messagesScroll.addView(messagesBox);
         root.addView(messagesScroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
 
-        attachmentLabel = text("ماكو صورة مرفقة", 10, MUTED, false);
+        attachmentLabel = text("ماكو مرفق", 10, MUTED, false);
         attachmentLabel.setPadding(dp(3), dp(2), dp(3), dp(2));
         attachmentLabel.setVisibility(View.GONE);
         root.addView(attachmentLabel, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         LinearLayout composer = new LinearLayout(this);
         composer.setGravity(Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+        Button attachButton = button("＋", PANEL2, TEXT);
+        attachButton.setTextSize(20);
+        attachButton.setContentDescription("إرفاق صورة أو ملف نصي");
+        composer.addView(attachButton, new LinearLayout.LayoutParams(dp(42), dp(48)));
+        attachButton.setOnClickListener(v -> pickAttachment());
         input = new EditText(this);
         input.setTextColor(TEXT); input.setHintTextColor(MUTED); input.setTextSize(14);
         input.setGravity(Gravity.TOP | Gravity.START);
@@ -173,7 +195,7 @@ public class AiAssistantActivity extends Activity {
         input.setPadding(dp(12), dp(8), dp(12), dp(8));
         input.setBackground(round(PANEL2, 16, DIVIDER));
         LinearLayout.LayoutParams inputLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1);
-        inputLp.rightMargin = dp(6);
+        inputLp.rightMargin = dp(6); inputLp.leftMargin = dp(5);
         composer.addView(input, inputLp);
 
         Button send = button("↑", ACCENT, BG);
@@ -818,6 +840,7 @@ public class AiAssistantActivity extends Activity {
             saveChats(); if (chatId.equals(activeChatId)) renderMessages();
             return;
         }
+        AgentBackgroundService.progress(this, "الوكيل جهّز أداة وينفذ الخطوة التالية داخل Termux.");
         String command = agentCommand(action);
         if (command.trim().isEmpty()) {
             appendChatMessage(chat, "assistant", "الوكيل رجّع أداة بدون أمر قابل للتنفيذ.");
@@ -866,8 +889,11 @@ public class AiAssistantActivity extends Activity {
         String expanded = AgentSkillManager.expandSlashCommand(this, userText);
         if (expanded == null) { Toast.makeText(this, "المهارة غير مثبتة. افتح إعدادات AI ثم Agent Skills وثبّت رابط SKILL.md أولًا.", Toast.LENGTH_LONG).show(); return; }
         JSONObject chat = current(); if (chat == null) return;
-        String image = attachedImage; attachedImage = ""; autoScreenshotUsed = false;
-        attachmentLabel.setText("ماكو صورة مرفقة"); attachmentLabel.setVisibility(View.GONE); attachmentLabel.setVisibility(View.GONE); input.setText("");
+        String image = attachedImage;
+        final String attachmentContent = attachedText;
+        final String selectedAttachmentName = attachedName;
+        attachedImage = ""; attachedText = ""; attachedName = ""; autoScreenshotUsed = false;
+        attachmentLabel.setText("ماكو مرفق"); attachmentLabel.setVisibility(View.GONE); input.setText("");
         String chatId = chat.optString("id");
         cancelledAgentRuns.put(chatId, false);
         noProgressContinuations.put(chatId, 0);
@@ -877,12 +903,17 @@ public class AiAssistantActivity extends Activity {
         }
         String sessionId = chat.optString("sessionId", "");
         String enriched = withTerminalContext(expanded, sessionId);
+        if (!selectedAttachmentName.isEmpty()) {
+            if (!attachmentContent.isEmpty()) enriched += "\n\n[محتوى المرفق: " + selectedAttachmentName + "]\n" + attachmentContent;
+            else enriched += "\n\n[الصورة المرفقة: " + selectedAttachmentName + ". حلّل الصورة مع الطلب الحالي.]";
+        }
         if (AgentWebSearch.shouldRequireSearch(userText)) enriched += "\n\n[MANDATORY WEB RESEARCH] The app will run web_search before this turn and append its returned sources. Use those sources, cite their URLs, and search again only if the evidence is missing or ambiguous. Do not answer from memory alone.";
         saveChats();
         final String requestText = enriched;
         final String imagePath = image;
         final String streamId = appendStreamingAssistant(chat);
         busy = true; sendButton.setEnabled(false);
+        AgentBackgroundService.start(this, chatId);
         if (rateLabel != null) rateLabel.setText("يفكّر الموديل ويرسل الرد تدريجيًا…");
 
         syncAgentWorkspace(() -> {
@@ -925,11 +956,23 @@ public class AiAssistantActivity extends Activity {
                 }
                 String response;
                 try {
-                    response = AiApiClient.sendStreaming(this, AiProvider.byId(finalProviderId), finalModel, finalEndpoint,
-                            AiSecureStore.getKey(this, finalProviderId), history, imagePath, Math.max(128, Math.min(8192, AiSecureStore.settings(this).getInt("output_budget_tokens", 2048))), new AiApiClient.StreamListener() {
-                        @Override public void onText(String fragment) { appendStreamDelta(chatId, streamId, false, fragment); }
-                        @Override public void onThinking(String fragment) { appendStreamDelta(chatId, streamId, true, fragment); }
-                    });
+                    JSONArray requestHistory = history;
+                    boolean compactEnabled = AiContextCompactor.isEnabled(this);
+                    if (compactEnabled) {
+                        String compacted = AiContextCompactor.compact(this, liveChat.optJSONArray("messages"), history, finalProviderId);
+                        requestHistory = new JSONArray().put(new JSONObject().put("role", "user").put("text", compacted));
+                        AiSecureStore.settings(this).edit().putString("context_compact_system_override", AiContextCompactor.primarySystemPrompt()).apply();
+                        AgentBackgroundService.progress(this, "ضغط الذاكرة والمحادثة بمزوّد ثانوي قبل إرسال الطلب الأساسي.");
+                    }
+                    try {
+                        response = AiApiClient.sendStreaming(this, AiProvider.byId(finalProviderId), finalModel, finalEndpoint,
+                                AiSecureStore.getKey(this, finalProviderId), requestHistory, imagePath, Math.max(128, Math.min(8192, AiSecureStore.settings(this).getInt("output_budget_tokens", 2048))), new AiApiClient.StreamListener() {
+                            @Override public void onText(String fragment) { appendStreamDelta(chatId, streamId, false, fragment); }
+                            @Override public void onThinking(String fragment) { appendStreamDelta(chatId, streamId, true, fragment); }
+                        });
+                    } finally {
+                        AiSecureStore.settings(this).edit().remove("context_compact_system_override").apply();
+                    }
                 } catch (Exception e) { response = "[تعذر إكمال الطلب]\n" + e.getMessage(); }
                 final String result = response;
                 runOnUiThread(() -> {
@@ -945,15 +988,17 @@ public class AiAssistantActivity extends Activity {
                     try { JSONObject streamEntry = findStreamMessage(findChat(chatId), streamId); if (streamEntry != null && next != null) streamEntry.put("agent_action", next); } catch (Exception ignored) { }
                     visible = normalizeAgentActionForDisplay(visible, next);
                     finishStreamingAssistant(chatId, streamId, visible);
-                    boolean requestedScreenshot = result.contains("[TFM_SCREENSHOT]") || result.contains("[REQUEST_SCREENSHOT]");
                     busy = false; if (sendButton != null) sendButton.setEnabled(true); updateHeader();
-                    if (requestedScreenshot && !autoScreenshotUsed) { autoScreenshotUsed = true; beginAgentScreenshotCapture(chatId, finalProviderId, finalModel, finalEndpoint); return; }
-                    if (isAgentRunCancelled(chatId)) return;
-                    if (thinkingOnly) { queueAgentContinuation(chatId, true); return; }
-                    if (emptyAnswer) { noProgressContinuations.put(chatId, 0); return; }
+                    if (isAgentRunCancelled(chatId)) { AgentBackgroundService.complete(this, "أوقف المستخدم دورة الوكيل."); return; }
+                    if (thinkingOnly) { AgentBackgroundService.progress(this, "الوكيل يرتب الخطوة التالية."); queueAgentContinuation(chatId, true); return; }
+                    if (emptyAnswer) { noProgressContinuations.put(chatId, 0); AgentBackgroundService.complete(this, visible); return; }
+                    boolean willAutoContinue = next != null && !"finish".equals(next.optString("tool", ""))
+                            && (isSkillActivation(next) || isInternalAgentAction(next) || autoExecutionEnabled(chatId));
+                    if (next == null || "finish".equals(next.optString("tool", ""))) AgentBackgroundService.complete(this, visible);
+                    else if (willAutoContinue) AgentBackgroundService.progress(this, "الوكيل يواصل التنفيذ: " + visible);
+                    else AgentBackgroundService.waiting(this, "الوكيل ينتظر موافقتك على الإجراء المقترح: " + visible);
                     if (next == null) noProgressContinuations.put(chatId, 0);
-                    if (next != null && !"finish".equals(next.optString("tool", ""))
-                            && (isSkillActivation(next) || isInternalAgentAction(next) || autoExecutionEnabled(chatId))) executeAgentAction(chatId, next, true);
+                    if (willAutoContinue) executeAgentAction(chatId, next, true);
                     // A plain-text response is a completed model turn, not an implicit request to call the API again.
                     // Continuation must be explicit via tfm_action.continue; this prevents runaway loops.
                 });
@@ -987,6 +1032,7 @@ public class AiAssistantActivity extends Activity {
             String key = thinking ? "thinking" : "text";
             try { entry.put(key, entry.optString(key, "") + fragment); } catch (Exception ignored) { }
             String accumulated = entry.optString(key, "");
+            if (!thinking) AgentBackgroundService.progress(AiAssistantActivity.this, accumulated);
             StreamViews views = activeStreams.get(streamId);
             if (views != null) {
                 if (thinking) {
@@ -1028,6 +1074,84 @@ public class AiAssistantActivity extends Activity {
     private void doBroadcast(String prompt){input.setText("");JSONArray snapshot=AiSecureStore.cloneArray(chats);String active=activeChatId;busy=true;sendButton.setEnabled(false);rateLabel.setText("إرسال متتابع إلى الدردشات…");worker.execute(()->{List<String> summaries=new ArrayList<>();for(int i=0;i<snapshot.length();i++){JSONObject c=snapshot.optJSONObject(i);if(c==null)continue;String pid=c.optString("provider",AiSecureStore.getActiveProvider(this)),chatId=c.optString("id");try{String key=AiSecureStore.getKey(this,pid);if(key.isEmpty()){summaries.add(c.optString("name")+": تخطّيت لعدم وجود مفتاح");continue;}appendChatMessage(c,"user",prompt);String model=AiSecureStore.getModel(this,pid),endpoint=AiSecureStore.getEndpoint(this,pid);JSONArray history=apiHistory(c);String sid=c.optString("sessionId","");if(history.length()>0)history.put(history.length()-1,new JSONObject().put("role","user").put("text",withTerminalContext(prompt,sid)));String answer=AiApiClient.send(this,AiProvider.byId(pid),model,endpoint,key,history,"",2048);appendChatMessage(c,"assistant",answer);summaries.add(c.optString("name")+": وصل رد");int gap=AiSecureStore.settings(this).getInt("rate_gap_seconds",3);if(gap>0)Thread.sleep(gap*1000L);}catch(Exception e){appendChatMessage(c,"assistant","[خطأ أثناء البث]\n"+e.getMessage());summaries.add(c.optString("name")+": "+e.getMessage());}saveChats();}runOnUiThread(()->{busy=false;sendButton.setEnabled(true);rebuildChatSpinner();activeChatId=active;chatsSpinner.setSelection(indexOfChat(activeChatId));updateHeader();renderMessages();new AlertDialog.Builder(this).setTitle("نتيجة الإرسال الجماعي").setMessage(android.text.TextUtils.join("\n",summaries)).setPositiveButton("حسنًا",null).show();});});}
     private void confirmSuggestedCommand(String chatId,String code){JSONObject c=findChat(chatId);if(c==null)return;String sid=c.optString("sessionId","");JSONObject s=AiSecureStore.findById(sessions,sid);String wd=s==null?"~/":s.optString("workdir","~/");new AlertDialog.Builder(this).setTitle("تأكيد أمر اقترحه AI").setMessage("راجع الأمر بالكامل قبل تشغيله داخل Termux. أي أمر shell قد يعدّل ملفاتك أو يثبت حزمًا.\n\nمجلد التشغيل: "+wd+"\n\n"+code).setPositiveButton("تنفيذ داخل Termux",(d,w)->{try{int id=TermuxCommandRunner.run(this,code,wd,"AI approved command",true);commandChats.put(id,chatId);Toast.makeText(this,"تم إرسال الأمر إلى Termux؛ ستُضاف المخرجات إلى الدردشة",Toast.LENGTH_LONG).show();}catch(Exception e){alert(e.getMessage());}}).setNeutralButton("نسخ الأمر",(d,w)->{ClipboardManager cm=(ClipboardManager)getSystemService(CLIPBOARD_SERVICE);cm.setPrimaryClip(ClipData.newPlainText("AI command",code));}).setNegativeButton("إلغاء",null).show();}
     private String firstCodeBlock(String s){Matcher m=Pattern.compile("```(?:[a-zA-Z0-9_+.-]+)?\\s*([\\s\\S]*?)```").matcher(s==null?"":s);return m.find()?m.group(1).trim():"";}
+    private void pickAttachment() {
+        try {
+            Intent picker = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            picker.addCategory(Intent.CATEGORY_OPENABLE);
+            picker.setType("*/*");
+            picker.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startActivityForResult(picker, REQUEST_ATTACHMENT_FILE);
+        } catch (Exception e) { alert("تعذر فتح اختيار المرفقات: " + e.getMessage()); }
+    }
+
+    @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != REQUEST_ATTACHMENT_FILE || resultCode != RESULT_OK || data == null || data.getData() == null) return;
+        android.net.Uri uri = data.getData();
+        try {
+            String mime = getContentResolver().getType(uri);
+            if (mime == null) mime = "application/octet-stream";
+            String name = "attachment";
+            try (android.database.Cursor cursor = getContentResolver().query(uri, new String[]{android.provider.OpenableColumns.DISPLAY_NAME}, null, null, null)) {
+                if (cursor != null && cursor.moveToFirst()) { int ix = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME); if (ix >= 0) { String n = cursor.getString(ix); if (n != null && !n.trim().isEmpty()) name = n; } }
+            }
+            if (mime.toLowerCase(java.util.Locale.ROOT).startsWith("image/")) {
+                attachedImage = createJpegAttachment(uri);
+                attachedText = "";
+                attachedName = name;
+            } else if (isTextAttachment(name, mime)) {
+                attachedText = readTextAttachment(uri, 262144);
+                attachedImage = "";
+                attachedName = name;
+            } else {
+                Toast.makeText(this, "النوع غير مدعوم مباشرة. اختَر صورة أو ملف نص/كود مثل TXT وMD وJSON وJAVA وPY وSH وRS.", Toast.LENGTH_LONG).show();
+                return;
+            }
+            attachmentLabel.setText("مرفق: " + attachedName);
+            attachmentLabel.setVisibility(View.VISIBLE);
+            Toast.makeText(this, "تم إرفاق " + attachedName + "؛ راجع المحتوى قبل الإرسال.", Toast.LENGTH_LONG).show();
+        } catch (Exception e) {
+            attachedImage = ""; attachedText = ""; attachedName = "";
+            Toast.makeText(this, "تعذر قراءة المرفق: " + e.getMessage(), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private boolean isTextAttachment(String name, String mime) {
+        String m = mime == null ? "" : mime.toLowerCase(java.util.Locale.ROOT);
+        if (m.startsWith("text/") || m.contains("json") || m.contains("xml") || m.contains("javascript")) return true;
+        String n = name == null ? "" : name.toLowerCase(java.util.Locale.ROOT);
+        String[] extensions = {".txt", ".md", ".markdown", ".json", ".xml", ".yaml", ".yml", ".toml", ".ini", ".properties", ".log", ".csv", ".java", ".kt", ".py", ".js", ".ts", ".html", ".css", ".sh", ".bash", ".rs", ".c", ".h", ".cpp", ".go", ".rb", ".php", ".sql", ".gradle", ".kts", ".diff", ".patch", ".env.example"};
+        for (String ext : extensions) if (n.endsWith(ext)) return true;
+        return false;
+    }
+
+    private String readTextAttachment(android.net.Uri uri, int limit) throws Exception {
+        try (java.io.InputStream in = getContentResolver().openInputStream(uri); java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream()) {
+            if (in == null) throw new java.io.IOException("ما قدرنا نفتح الملف.");
+            byte[] buffer = new byte[8192]; int n;
+            while ((n = in.read(buffer)) != -1) { if (out.size() + n > limit) throw new java.io.IOException("الملف النصي أكبر من 256 KB؛ قسّمه إلى أجزاء أصغر."); out.write(buffer, 0, n); }
+            return out.toString("UTF-8");
+        }
+    }
+
+    private String createJpegAttachment(android.net.Uri uri) throws Exception {
+        android.graphics.BitmapFactory.Options bounds = new android.graphics.BitmapFactory.Options(); bounds.inJustDecodeBounds = true;
+        try (java.io.InputStream in = getContentResolver().openInputStream(uri)) { if (in == null) throw new java.io.IOException("ما قدرنا نفتح الصورة."); android.graphics.BitmapFactory.decodeStream(in, null, bounds); }
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) throw new java.io.IOException("الصورة غير صالحة أو صيغة الصورة غير مدعومة.");
+        int sample = 1;
+        while (bounds.outWidth / sample > 1600 || bounds.outHeight / sample > 1600) sample *= 2;
+        android.graphics.BitmapFactory.Options options = new android.graphics.BitmapFactory.Options(); options.inSampleSize = sample; options.inPreferredConfig = android.graphics.Bitmap.Config.RGB_565;
+        android.graphics.Bitmap bitmap;
+        try (java.io.InputStream in = getContentResolver().openInputStream(uri)) { if (in == null) throw new java.io.IOException("ما قدرنا نفتح الصورة."); bitmap = android.graphics.BitmapFactory.decodeStream(in, null, options); }
+        if (bitmap == null) throw new java.io.IOException("تعذر فك ترميز الصورة.");
+        java.io.File dir = new java.io.File(getCacheDir(), "attachments"); if (!dir.exists() && !dir.mkdirs()) { bitmap.recycle(); throw new java.io.IOException("تعذر إنشاء مجلد المرفقات."); }
+        java.io.File file = new java.io.File(dir, "image-" + System.currentTimeMillis() + ".jpg");
+        try (java.io.FileOutputStream out = new java.io.FileOutputStream(file)) { if (!bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 82, out)) throw new java.io.IOException("تعذر تحويل الصورة إلى JPEG."); }
+        bitmap.recycle();
+        if (file.length() > 5L * 1024L * 1024L) { file.delete(); throw new java.io.IOException("الصورة بعد الضغط أكبر من 5 MB."); }
+        return file.getAbsolutePath();
+    }
+
     private void captureOrAttach() {
         if (!AiSecureStore.isCaptureActive(this)) {
             startActivity(new Intent(this, ScreenCaptureActivity.class));
@@ -1104,11 +1228,21 @@ public class AiAssistantActivity extends Activity {
                     long wait = gap * 1000L - (System.currentTimeMillis() - lastCall);
                     if (wait > 30000L) throw new Exception("الفاصل المحلي المتبقي أطول من 30 ثانية؛ أرسل متابعة لاحقًا.");
                     if (wait > 0) Thread.sleep(wait);
-                    answer = AiApiClient.sendStreaming(this, AiProvider.byId(finalProviderId), finalModel, finalEndpoint,
-                            AiSecureStore.getKey(this, finalProviderId), history, "", Math.max(128, Math.min(8192, AiSecureStore.settings(this).getInt("output_budget_tokens", 2048))), new AiApiClient.StreamListener() {
-                        @Override public void onText(String fragment) { appendStreamDelta(chatId, streamId, false, fragment); }
-                        @Override public void onThinking(String fragment) { appendStreamDelta(chatId, streamId, true, fragment); }
-                    });
+                    JSONArray requestHistory = history;
+                    if (AiContextCompactor.isEnabled(this)) {
+                        String compacted = AiContextCompactor.compact(this, liveChat.optJSONArray("messages"), history, finalProviderId);
+                        requestHistory = new JSONArray().put(new JSONObject().put("role", "user").put("text", compacted));
+                        AiSecureStore.settings(this).edit().putString("context_compact_system_override", AiContextCompactor.primarySystemPrompt()).apply();
+                    }
+                    try {
+                        answer = AiApiClient.sendStreaming(this, AiProvider.byId(finalProviderId), finalModel, finalEndpoint,
+                                AiSecureStore.getKey(this, finalProviderId), requestHistory, "", Math.max(128, Math.min(8192, AiSecureStore.settings(this).getInt("output_budget_tokens", 2048))), new AiApiClient.StreamListener() {
+                            @Override public void onText(String fragment) { appendStreamDelta(chatId, streamId, false, fragment); }
+                            @Override public void onThinking(String fragment) { appendStreamDelta(chatId, streamId, true, fragment); }
+                        });
+                    } finally {
+                        AiSecureStore.settings(this).edit().remove("context_compact_system_override").apply();
+                    }
                 } catch (Exception e) { answer = "[لم يكتمل تحليل مخرجات Termux]\n" + e.getMessage(); }
                 final String result = answer;
                 runOnUiThread(() -> {
@@ -1126,11 +1260,15 @@ public class AiAssistantActivity extends Activity {
                     finishStreamingAssistant(chatId, streamId, visible);
                     busy = false; if (sendButton != null) sendButton.setEnabled(true); updateHeader();
                     if (isAgentRunCancelled(chatId)) return;
-                    if (thinkingOnly) { queueAgentContinuation(chatId, true); return; }
-                    if (emptyAnswer) { noProgressContinuations.put(chatId, 0); return; }
+                    if (thinkingOnly) { AgentBackgroundService.progress(this, "الوكيل يراجع مخرجات Termux ويواصل المهمة."); queueAgentContinuation(chatId, true); return; }
+                    if (emptyAnswer) { noProgressContinuations.put(chatId, 0); AgentBackgroundService.complete(this, visible); return; }
                     if (next == null) noProgressContinuations.put(chatId, 0);
-                    if (next != null && !"finish".equals(next.optString("tool", ""))
-                            && (isSkillActivation(next) || isInternalAgentAction(next) || autoExecutionEnabled(chatId))) executeAgentAction(chatId, next, true);
+                    boolean willAutoContinue = next != null && !"finish".equals(next.optString("tool", ""))
+                            && (isSkillActivation(next) || isInternalAgentAction(next) || autoExecutionEnabled(chatId));
+                    if (next == null || "finish".equals(next.optString("tool", ""))) AgentBackgroundService.complete(this, visible);
+                    else if (willAutoContinue) AgentBackgroundService.progress(this, "الوكيل يواصل التنفيذ: " + visible);
+                    else AgentBackgroundService.waiting(this, "الوكيل ينتظر موافقتك على الإجراء المقترح: " + visible);
+                    if (willAutoContinue) executeAgentAction(chatId, next, true);
                     // Do not blindly retry a natural-language or malformed response. Explicit continue is required.
                 });
             });
@@ -1176,7 +1314,7 @@ public class AiAssistantActivity extends Activity {
                 "تبديل الدردشة", "دردشة جديدة", "المزوّد والنموذج لهذه الدردشة", "جلسة Termux المرتبطة",
                 "إعدادات الدردشة الحالية", "إعدادات المزوّدين وكل الجلسات", "إدارة جلسات Terminal و TUI",
                 "أوامر Terminal سريعة", "إرسال النص إلى كل الدردشات", "فتح تطبيق Termux",
-                "لقطة شاشة / إرفاق صورة", "حذف آخر لقطة", "إيقاف دورة الوكيل بعد العملية الحالية", "إيقاف مشاركة الشاشة"
+                "إرفاق صورة أو ملف نصي/كود", "إزالة المرفق", "إيقاف دورة الوكيل بعد العملية الحالية"
         };
         new AlertDialog.Builder(this).setTitle("خيارات الوكيل").setItems(items, (d, w) -> {
             if (w == 0) chooseAgentChat();
@@ -1189,11 +1327,9 @@ public class AiAssistantActivity extends Activity {
             else if (w == 7) showTerminalPopup();
             else if (w == 8) broadcastPrompt();
             else if (w == 9) openTermux();
-            else if (w == 10) captureOrAttach();
-            else if (w == 11) { AiSecureStore.clearLastScreenshot(this); attachedImage = ""; attachmentLabel.setText("ماكو صورة مرفقة"); attachmentLabel.setVisibility(View.GONE); Toast.makeText(this, "تم حذف آخر لقطة", Toast.LENGTH_SHORT).show(); }
+            else if (w == 10) pickAttachment();
+            else if (w == 11) { attachedImage = ""; attachedText = ""; attachedName = ""; attachmentLabel.setText("ماكو مرفق"); attachmentLabel.setVisibility(View.GONE); Toast.makeText(this, "تمت إزالة المرفق", Toast.LENGTH_SHORT).show(); }
             else if (w == 12) stopAgentRun();
-            else { try { startService(new Intent(this, ScreenCaptureService.class).setAction(ScreenCaptureService.ACTION_STOP)); } catch (Exception ignored) { }
-                AiSecureStore.setCaptureActive(this, false); Toast.makeText(this, "تم طلب إيقاف مشاركة الشاشة", Toast.LENGTH_SHORT).show(); }
         }).show();
     }
 
@@ -1219,7 +1355,7 @@ public class AiAssistantActivity extends Activity {
     private List<String> terminalNames(){List<String> a=new ArrayList<>();if(sessions.length()==0)a.add("ماكو جلسات — افتح Terminal");for(int i=0;i<sessions.length();i++){JSONObject s=sessions.optJSONObject(i);a.add(s==null?"Terminal":s.optString("name","Terminal")+" · "+s.optString("workdir","~/"));}return a;}
     private String sessionIdAt(int p){if(p<0||p>=sessions.length())return "";return sessions.optJSONObject(p).optString("id","");}
     private int indexOfSession(String id){if(id.isEmpty())return 0;for(int i=0;i<sessions.length();i++)if(id.equals(sessions.optJSONObject(i).optString("id")))return i;return 0;}
-    @Override protected void onResume(){super.onResume();String currentTheme=UiTheme.getName(this);if(lastThemeName!=null&&!lastThemeName.equals(currentTheme)){recreate();return;}if(providerSpinner!=null){sessions=AiSecureStore.loadArray(this,AiSecureStore.SESSIONS,"items");updatingSpinners=true;terminalSpinner.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,terminalNames()));updatingSpinners=false;updateHeader();maybeSubmitPendingScreenshot();}}
+    @Override protected void onResume(){super.onResume();AgentBackgroundService.setAppBackground(this,false);String currentTheme=UiTheme.getName(this);if(lastThemeName!=null&&!lastThemeName.equals(currentTheme)){recreate();return;}if(providerSpinner!=null){sessions=AiSecureStore.loadArray(this,AiSecureStore.SESSIONS,"items");updatingSpinners=true;terminalSpinner.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,terminalNames()));updatingSpinners=false;updateHeader();maybeSubmitPendingScreenshot();}}
     private TextView text(String s,int size,int c,boolean bold){TextView t=new TextView(this);t.setText(s);t.setTextSize(size);t.setTextColor(c);if(bold)t.setTypeface(Typeface.DEFAULT,Typeface.BOLD);return t;}
     private Button button(String s,int bg,int fg){Button b=new Button(this);b.setText(s);b.setTextColor(fg);b.setTextSize(12);b.setAllCaps(false);b.setMinHeight(0);b.setMinimumHeight(0);b.setPadding(dp(5),dp(4),dp(5),dp(4));b.setBackground(round(bg,10,Color.TRANSPARENT));return b;}
     private GradientDrawable round(int c,int r,int stroke){GradientDrawable d=new GradientDrawable();d.setColor(c);d.setCornerRadius(dp(r));if(stroke!=Color.TRANSPARENT)d.setStroke(dp(1),stroke);return d;}

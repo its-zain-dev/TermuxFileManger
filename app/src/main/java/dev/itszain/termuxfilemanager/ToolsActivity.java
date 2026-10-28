@@ -31,6 +31,7 @@ import java.util.Map;
 /** Command center for Termux: commands, packages, libraries and runtime diagnostics. */
 public class ToolsActivity extends Activity {
     private int BG, PANEL, PANEL_2, TEXT, MUTED, ACCENT, DIVIDER;
+    private UiKit kit;
     private String lastThemeName="midnight";
     private EditText commandInput;
     private EditText workdirInput;
@@ -42,6 +43,7 @@ public class ToolsActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        kit=new UiKit(this);
         UiTheme palette=UiTheme.get(this); BG=palette.bg; PANEL=palette.panel; PANEL_2=palette.panel2; TEXT=palette.text; MUTED=palette.muted; ACCENT=palette.accent; DIVIDER=Color.rgb(42,53,77); lastThemeName=UiTheme.getName(this);
         getWindow().setStatusBarColor(BG);
         getWindow().setNavigationBarColor(BG);
@@ -56,52 +58,49 @@ public class ToolsActivity extends Activity {
 
     private void buildUi() {
         LinearLayout root=new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(BG); root.setPadding(dp(15),dp(8),dp(15),dp(10)); setContentView(root);
-        LinearLayout header=new LinearLayout(this); header.setGravity(Gravity.CENTER_VERTICAL);
-        Button back=button("‹",PANEL_2,TEXT); back.setTextSize(26); header.addView(back,new LinearLayout.LayoutParams(dp(44),dp(44))); back.setOnClickListener(v->finish());
-        LinearLayout titleBox=new LinearLayout(this); titleBox.setOrientation(LinearLayout.VERTICAL);
-        titleBox.addView(text("مركز الأدوات",20,TEXT,true)); titleBox.addView(text("أوامر وحزم وتشخيص Termux",11,MUTED,false));
-        LinearLayout.LayoutParams titleLp=new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1); titleLp.leftMargin=dp(7); header.addView(titleBox,titleLp);
-        Button terminal=button("Terminal",PANEL_2,TEXT); header.addView(terminal,new LinearLayout.LayoutParams(dp(84),dp(40)));
-        terminal.setOnClickListener(v->startActivity(new Intent(this,TerminalSessionsActivity.class))); root.addView(header);
-        TextView note=text("كل العمليات تعمل بصلاحيات Termux العادية. راجع أوامر التثبيت والتعديل قبل الموافقة.",11,MUTED,false);
-        note.setPadding(dp(3),dp(5),dp(3),dp(8)); root.addView(note);
+        root.setBackgroundColor(kit.bg); root.setPadding(dp(12),dp(4),dp(12),dp(10)); setContentView(root);
+        LinearLayout header=kit.subBar("مركز الأدوات","أوامر وحزم وتشخيص Termux",this::finish); root.addView(header);
+        Button terminal=kit.ghost("Terminal"); terminal.setTextSize(12);
+        LinearLayout headerRow=new LinearLayout(this); headerRow.setOrientation(LinearLayout.HORIZONTAL); headerRow.setGravity(Gravity.CENTER_VERTICAL);
+        headerRow.addView(terminal,new LinearLayout.LayoutParams(dp(92),dp(36)));
+        headerRow.addView(kit.text("كل العمليات تعمل بصلاحيات Termux العادية. راجع أوامر التثبيت والتعديل قبل الموافقة.",11,kit.muted,false),new LinearLayout.LayoutParams(0,dp(36),1));
+        root.addView(headerRow);
 
         ScrollView scroll=new ScrollView(this); LinearLayout content=new LinearLayout(this); content.setOrientation(LinearLayout.VERTICAL); scroll.addView(content);
         root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
-        content.addView(sectionTitle("منفّذ الأوامر"));
-        LinearLayout commandCard=card();
-        commandCard.addView(text("نفّذ أوامر Shell أو سكربت متعدد الأسطر، وشاهد الخرج هنا.",12,MUTED,false),matchWrap());
-        commandInput=new EditText(this); commandInput.setTextColor(TEXT); commandInput.setHintTextColor(MUTED); commandInput.setHint("pkg list-installed\npython --version\nls -la");
-        commandInput.setTextSize(13); commandInput.setTypeface(Typeface.MONOSPACE); commandInput.setGravity(Gravity.TOP|Gravity.START);
+        content.addView(kit.sectionTitle("منفّذ الأوامر"));
+        LinearLayout commandCard=kit.card();
+        commandCard.addView(kit.caption("نفّذ أوامر Shell أو سكربت متعدد الأسطر، وشاهد الخرج هنا."),matchWrap());
+        commandInput=new EditText(this); commandInput.setTextColor(kit.text); commandInput.setHintTextColor(kit.muted); commandInput.setHint("pkg list-installed\npython --version\nls -la");
+        commandInput.setTextSize(12.5f); commandInput.setTypeface(Typeface.MONOSPACE); commandInput.setGravity(Gravity.TOP|Gravity.START);
         commandInput.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_FLAG_MULTI_LINE|InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
-        commandInput.setMinLines(3); commandInput.setMaxLines(8); commandInput.setPadding(dp(11),dp(10),dp(11),dp(10)); commandInput.setBackground(round(PANEL_2,11,DIVIDER));
+        commandInput.setMinLines(3); commandInput.setMaxLines(8); commandInput.setPadding(kit.dp(11),kit.dp(10),kit.dp(11),kit.dp(10)); commandInput.setBackground(kit.round(kit.panelAlt,12,kit.outline));
         LinearLayout.LayoutParams commandLp=matchWrap(); commandLp.topMargin=dp(8); commandCard.addView(commandInput,commandLp);
-        TextView workLabel=text("مجلد التشغيل",11,MUTED,true); LinearLayout.LayoutParams workLabelLp=matchWrap(); workLabelLp.topMargin=dp(8); commandCard.addView(workLabel,workLabelLp);
-        workdirInput=new EditText(this); workdirInput.setSingleLine(true); workdirInput.setText("~/"); workdirInput.setTextColor(TEXT); workdirInput.setHintTextColor(MUTED);
-        workdirInput.setTextSize(13); workdirInput.setPadding(dp(10),0,dp(10),0); workdirInput.setBackground(round(PANEL_2,10,DIVIDER));
-        LinearLayout.LayoutParams workLp=new LinearLayout.LayoutParams(-1,dp(42)); workLp.topMargin=dp(4); commandCard.addView(workdirInput,workLp);
-        Button run=button("▶ تشغيل داخل Termux",ACCENT,BG); LinearLayout.LayoutParams runLp=matchWrap(); runLp.topMargin=dp(9); commandCard.addView(run,runLp);
+        TextView workLabel=kit.text("مجلد التشغيل",11,kit.muted,true); LinearLayout.LayoutParams workLabelLp=matchWrap(); workLabelLp.topMargin=dp(8); commandCard.addView(workLabel,workLabelLp);
+        workdirInput=new EditText(this); workdirInput.setSingleLine(true); workdirInput.setText("~/"); workdirInput.setTextColor(kit.text); workdirInput.setHintTextColor(kit.muted);
+        workdirInput.setTextSize(13); workdirInput.setPadding(kit.dp(11),0,kit.dp(11),0); workdirInput.setBackground(kit.round(kit.panelAlt,12,kit.outline));
+        LinearLayout.LayoutParams workLp=new LinearLayout.LayoutParams(-1,dp(44)); workLp.topMargin=dp(4); commandCard.addView(workdirInput,workLp);
+        Button run=kit.primary("▶ تشغيل داخل Termux"); LinearLayout.LayoutParams runLp=matchWrap(); runLp.topMargin=dp(9); commandCard.addView(run,runLp);
         run.setOnClickListener(v->confirmAndRun(commandInput.getText().toString(),workdirInput.getText().toString(),"أمر من مركز الأدوات"));
-        outputView=text("بانتظار تنفيذ أمر…",12,TEXT,false); outputView.setTypeface(Typeface.MONOSPACE); outputView.setTextIsSelectable(true);
-        outputView.setGravity(Gravity.TOP|Gravity.START); outputView.setPadding(dp(10),dp(9),dp(10),dp(9)); outputView.setBackground(round(Color.rgb(13,17,23),10,DIVIDER));
+        outputView=kit.mono("بانتظار تنفيذ أمر…",12,kit.text); outputView.setTextIsSelectable(true);
+        outputView.setGravity(Gravity.TOP|Gravity.START); outputView.setPadding(kit.dp(11),kit.dp(10),kit.dp(11),kit.dp(10)); outputView.setBackground(kit.round(kit.bg,12,kit.outline));
         LinearLayout.LayoutParams outputLp=new LinearLayout.LayoutParams(-1,dp(148)); outputLp.topMargin=dp(8); commandCard.addView(outputView,outputLp);
         content.addView(commandCard);
 
-        content.addView(sectionTitle("الأدوات حسب المهمة"));
-        LinearLayout tools=card();
+        content.addView(kit.sectionTitle("الأدوات حسب المهمة"));
+        LinearLayout tools=kit.card();
         addAction(tools,"مدير الحزم","بحث، تثبيت، تحديث وفحص حزم Termux",()->showPackageMenu());
         addAction(tools,"مكتبات ولغات البرمجة","pip وnpm وcargo وgem وGo وComposer وLuaRocks",()->showLibrariesMenu());
         addAction(tools,"فحص وتشخيص النظام","المعمارية والذاكرة والتخزين والمترجمات المثبتة",()->showDiagnosticsMenu());
         addAction(tools,"ملفات ومشاريع","تنزيل HTTPS، ضغط وفك الأرشيفات وفتح Shell بالمجلد",()->showProjectToolsMenu());
         content.addView(tools);
-        TextView warning=text("التنفيذ ما يمنح root ولا يتجاوز عزل أندرويد. الأوامر التي تحذف ملفات أو تثبّت كود قد تغيّر بيئة Termux بالكامل.",11,MUTED,false);
+        TextView warning=kit.caption("التنفيذ ما يمنح root ولا يتجاوز عزل أندرويد. الأوامر التي تحذف ملفات أو تثبّت كود قد تغيّر بيئة Termux بالكامل.");
         warning.setPadding(dp(3),dp(12),dp(3),dp(5)); content.addView(warning);
     }
 
     private void showLibrariesMenu(){
         String[] items={"Python / pip","Node.js / npm","Rust / Cargo","Ruby / gem","Go install","LuaRocks","PHP Composer"};
-        new AlertDialog.Builder(this).setTitle("مكتبات ولغات البرمجة").setItems(items,(d,w)->{
+        kit.sheet("مكتبات ولغات البرمجة",items,w->{
             if(w==0)showInstallDialog("Python / pip","python -m pip install","اسم المكتبة");
             else if(w==1)showInstallDialog("Node.js / npm","npm install","اسم الحزمة");
             else if(w==2)showInstallDialog("Rust / Cargo","cargo install","اسم الأداة");
@@ -109,33 +108,33 @@ public class ToolsActivity extends Activity {
             else if(w==4)showInstallDialog("Go","go install","اسم الحزمة الكامل مثل example.com/tool@latest");
             else if(w==5)showInstallDialog("LuaRocks","luarocks install","اسم المكتبة");
             else showInstallDialog("PHP / Composer","composer require","vendor/package");
-        }).show();
+        });
     }
 
     private void showDiagnosticsMenu(){
         String[] items={"فحص اللغات والمترجمات","ملخص النظام والتخزين","الحزم المثبتة","تحديث فهرس الحزم","ترقية الحزم"};
-        new AlertDialog.Builder(this).setTitle("فحص وتشخيص").setItems(items,(d,w)->{
+        kit.sheet("فحص وتشخيص",items,w->{
             if(w==0)setCommandAndRun(runtimeCheck(),"~/","فحص لغات وأدوات Termux");
             else if(w==1)setCommandAndRun(systemCheck(),"~/","تشخيص Termux");
             else if(w==2)setCommandAndRun("pkg list-installed","~/","الحزم المثبتة");
             else if(w==3)confirmAndRun("pkg update","~/","تحديث فهرس الحزم");
             else confirmAndRun("pkg upgrade -y","~/","ترقية حزم Termux");
-        }).show();
+        });
     }
 
     private void showProjectToolsMenu(){
         String[] items={"تنزيل ملف من HTTPS","ضغط مجلد tar.gz","فك أرشيف zip أو tar.gz","فتح جلسة Shell"};
-        new AlertDialog.Builder(this).setTitle("ملفات ومشاريع").setItems(items,(d,w)->{
+        kit.sheet("ملفات ومشاريع",items,w->{
             if(w==0)showDownloadDialog();
             else if(w==1)showArchiveDialog();
             else if(w==2)showExtractDialog();
             else confirmAndRun("exec bash -l",workdirInput.getText().toString(),"جلسة Shell من مركز الأدوات");
-        }).show();
+        });
     }
 
     private void showPackageMenu() {
         String[] items = {"البحث عن حزمة", "تثبيت حزمة", "تثبيت تحديثات النظام (pkg update && pkg upgrade)", "تحديث الفهرس (pkg update)", "عرض الحزم المثبتة", "فحص أوامر pkg"};
-        new AlertDialog.Builder(this).setTitle("مدير حزم Termux").setItems(items, (d, which) -> {
+        kit.sheet("مدير حزم Termux", items, which -> {
             switch (which) {
                 case 0: showPackageNameDialog("بحث عن حزمة", "pkg search", "جزء من اسم الحزمة"); break;
                 case 1: showPackageNameDialog("تثبيت حزمة", "pkg install -y", "اسم الحزمة"); break;
@@ -144,64 +143,46 @@ public class ToolsActivity extends Activity {
                 case 4: setCommandAndRun("pkg list-installed", "~/", "الحزم المثبتة"); break;
                 case 5: setCommandAndRun("pkg --help", "~/", "مساعدة pkg"); break;
             }
-        }).setNegativeButton("إلغاء", null).show();
+        });
     }
 
     private void showPackageNameDialog(String title, String prefix, String hint) {
-        EditText input = input(hint);
-        new AlertDialog.Builder(this).setTitle(title).setView(input).setPositiveButton("متابعة", (d, w) -> {
-            String value = input.getText().toString().trim();
+        kit.promptDialog(title, hint, "", "متابعة", value -> {
             if (value.isEmpty()) return;
-            String cmd = prefix + " " + shellQuote(value);
-            confirmAndRun(cmd, "~/", title);
-        }).setNegativeButton("إلغاء", null).show();
+            confirmAndRun(prefix + " " + shellQuote(value), "~/", title);
+        });
     }
 
     private void showInstallDialog(String title, String prefix, String hint) {
-        EditText input = input(hint);
-        new AlertDialog.Builder(this).setTitle("" + title + " — تثبيت").setMessage("أدخل اسم الحزمة أو المكتبة. للأوامر المتقدمة استخدم مربع Shell الرئيسي.").setView(input)
-                .setPositiveButton("تثبيت", (d, w) -> {
-                    String value = input.getText().toString().trim();
-                    if (value.isEmpty()) return;
-                    confirmAndRun(prefix + " " + shellQuote(value), workdirInput.getText().toString(), title);
-                }).setNegativeButton("إلغاء", null).show();
+        kit.promptDialog(title + " — تثبيت", hint + " — للأوامر المتقدمة استخدم مربع Shell الرئيسي", "", "تثبيت", value -> {
+            if (value.isEmpty()) return;
+            confirmAndRun(prefix + " " + shellQuote(value), workdirInput.getText().toString(), title);
+        });
     }
 
     private void showArchiveDialog() {
-        LinearLayout layout = new LinearLayout(this);
-        layout.setOrientation(LinearLayout.VERTICAL);
-        EditText source = input("مسار المجلد المراد ضغطه");
-        source.setText("~/my-folder");
-        EditText dest = input("اسم الأرشيف الناتج");
-        dest.setText("archive.tar.gz");
-        layout.addView(source, matchWrap());
-        layout.addView(dest, matchWrap());
-        new AlertDialog.Builder(this).setTitle("ضغط مجلد tar.gz").setView(layout).setPositiveButton("إنشاء", (d, w) -> {
-            String src = source.getText().toString().trim(), out = dest.getText().toString().trim();
+        kit.promptDialog("ضغط مجلد tar.gz", "المسار المصدر ثم اسم الأرشيف، كل واحد في سطر", "~/my-folder\narchive.tar.gz", "إنشاء", value -> {
+            String[] parts = value.split("\n");
+            if (parts.length < 2) return;
+            String src = parts[0].trim(), out = parts[1].trim();
             if (src.isEmpty() || out.isEmpty()) return;
             confirmAndRun("tar -czf " + shellPath(out) + " -C " + shellPath(parentOfShell(src)) + " " + shellQuote(baseName(src)), "~/", "إنشاء أرشيف tar.gz");
-        }).setNegativeButton("إلغاء", null).show();
+        });
     }
 
     private void showExtractDialog() {
-        LinearLayout layout = new LinearLayout(this);
-        layout.setOrientation(LinearLayout.VERTICAL);
-        EditText archive = input("مسار archive.zip أو archive.tar.gz");
-        archive.setText("~/archive.tar.gz");
-        EditText dest = input("مجلد الوجهة");
-        dest.setText("~/extracted");
-        layout.addView(archive, matchWrap());
-        layout.addView(dest, matchWrap());
-        new AlertDialog.Builder(this).setTitle("فك الأرشيف").setView(layout).setPositiveButton("فك", (d, w) -> {
-            String a = archive.getText().toString().trim(), out = dest.getText().toString().trim();
+        kit.promptDialog("فك الأرشيف", "مسار الأرشيف ثم مجلد الوجهة، كل واحد في سطر", "~/archive.tar.gz\n~/extracted", "فك", value -> {
+            String[] parts = value.split("\n");
+            if (parts.length < 2) return;
+            String a = parts[0].trim(), out = parts[1].trim();
             if (a.isEmpty() || out.isEmpty()) return;
             String quotedA = shellPath(a), quotedOut = shellPath(out);
             String command = "mkdir -p " + quotedOut + " && case " + quotedA + " in *.zip) unzip " + quotedA + " -d " + quotedOut + ";; *.tar.gz|*.tgz) tar -xzf " + quotedA + " -C " + quotedOut + ";; *.tar) tar -xf " + quotedA + " -C " + quotedOut + ";; *) echo 'امتداد غير مدعوم في هذه الأداة؛ استخدم unzip أو tar يدويًا.'; exit 2;; esac";
             confirmAndRun(command, "~/", "فك أرشيف");
-        }).setNegativeButton("إلغاء", null).show();
+        });
     }
 
-    private void showDownloadDialog(){LinearLayout layout=new LinearLayout(this);layout.setOrientation(LinearLayout.VERTICAL);EditText url=input("رابط HTTPS للملف");EditText dest=input("مسار الوجهة مثل ~/Downloads/file.zip");url.setText("https://");dest.setText("~/Downloads/download.bin");layout.addView(url,matchWrap());layout.addView(dest,matchWrap());new AlertDialog.Builder(this).setTitle("تنزيل ملف").setMessage("يتطلب هذا الإجراء اتصالًا مباشرًا من Termux. استخدم الروابط التي تثق بها فقط.").setView(layout).setPositiveButton("تنزيل",(d,w)->{String u=url.getText().toString().trim(),to=dest.getText().toString().trim();if(!u.startsWith("https://")){new AlertDialog.Builder(this).setMessage("استخدم رابط HTTPS فقط.").setPositiveButton("حسنًا",null).show();return;}if(to.isEmpty())return;String cmd="mkdir -p \"$(dirname "+shellPath(to)+")\" && curl -fL --show-error --retry 2 "+shellQuote(u)+" -o "+shellPath(to)+" && ls -lh "+shellPath(to);confirmAndRun(cmd, "~/", "تنزيل ملف HTTPS");}).setNegativeButton("إلغاء",null).show();}
+    private void showDownloadDialog(){kit.promptDialog("تنزيل ملف","رابط HTTPS ثم مسار الوجهة، كل واحد في سطر. يتطلب اتصالًا مباشرًا من Termux — استخدم الروابط التي تثق بها فقط.","https://\n~/Downloads/download.bin","تنزيل",value->{String[] parts=value.split("\n");if(parts.length<2)return;String u=parts[0].trim(),to=parts[1].trim();if(!u.startsWith("https://")){kit.infoDialog("تنزيل ملف","استخدم رابط HTTPS فقط.");return;}if(to.isEmpty())return;String cmd="mkdir -p \"$(dirname "+shellPath(to)+")\" && curl -fL --show-error --retry 2 "+shellQuote(u)+" -o "+shellPath(to)+" && ls -lh "+shellPath(to);confirmAndRun(cmd, "~/", "تنزيل ملف HTTPS");});}
 
     private void setCommandAndRun(String command, String workdir, String label) {
         commandInput.setText(command);
@@ -217,20 +198,21 @@ public class ToolsActivity extends Activity {
             return;
         }
         if (!isTermuxInstalled()) {
-            new AlertDialog.Builder(this).setTitle("Termux غير مثبت").setMessage("ثبّت Termux ثم أعد المحاولة.").setPositiveButton("حسنًا", null).show();
+            kit.infoDialog("Termux غير مثبت", "ثبّت Termux ثم أعد المحاولة.");
             return;
         }
         if (checkSelfPermission("com.termux.permission.RUN_COMMAND") != PackageManager.PERMISSION_GRANTED) {
-            new AlertDialog.Builder(this).setTitle("صلاحية Termux مطلوبة").setMessage("امنح هذا التطبيق صلاحية Run commands in Termux environment وفعّل allow-external-apps=true داخل Termux.").setPositiveButton("فتح الإعدادات", (d, w) -> {
-                try { startActivity(new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:" + getPackageName()))); } catch (Exception ignored) { }
-            }).setNegativeButton("إلغاء", null).show();
+            kit.confirmDialog("صلاحية Termux مطلوبة",
+                    "امنح هذا التطبيق صلاحية Run commands in Termux environment وفعّل allow-external-apps=true داخل Termux.",
+                    "فتح الإعدادات", () -> {
+                        try { startActivity(new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:" + getPackageName()))); } catch (Exception ignored) { }
+                    });
             return;
         }
         String normalizedWorkdir = workdir == null || workdir.trim().isEmpty() ? "~/" : workdir.trim();
-        new AlertDialog.Builder(this).setTitle("تأكيد التنفيذ في Termux")
-                .setMessage("سيعمل الأمر في جلسة Termux مع صلاحيات مستخدم Termux. راجعه قبل التنفيذ:\n\n" + command)
-                .setPositiveButton("تنفيذ", (d, w) -> launchCommand(command, normalizedWorkdir, label))
-                .setNegativeButton("إلغاء", null).show();
+        kit.confirmDialog("تأكيد التنفيذ في Termux",
+                "سيعمل الأمر في جلسة Termux مع صلاحيات مستخدم Termux. راجعه قبل التنفيذ:\n\n" + command,
+                "تنفيذ", () -> launchCommand(command, normalizedWorkdir, label));
     }
 
     private void launchCommand(String commandText, String workdir, String label) {
@@ -240,7 +222,7 @@ public class ToolsActivity extends Activity {
             if(interactive){TermuxCommandRunner.openTui(this,commandText,workdir,label);Toast.makeText(this,"فُتحت جلسة Termux تفاعلية",Toast.LENGTH_SHORT).show();return;}
             int request=TermuxCommandRunner.run(this,commandText,workdir,label,true);requests.put(request,label);
         } catch (Exception e) {
-            new AlertDialog.Builder(this).setTitle("تعذر تشغيل الأمر").setMessage(String.valueOf(e.getMessage())).setPositiveButton("حسنًا", null).show();
+            kit.infoDialog("تعذر تشغيل الأمر", String.valueOf(e.getMessage()));
         }
     }
 
@@ -262,29 +244,22 @@ public class ToolsActivity extends Activity {
     }
 
     private void addAction(LinearLayout card, String title, String desc, Runnable action) {
-        LinearLayout item = new LinearLayout(this);
-        item.setGravity(Gravity.CENTER_VERTICAL);
-        item.setPadding(dp(8), dp(8), dp(8), dp(8));
-        item.setBackground(round(PANEL, 9, Color.TRANSPARENT));
-        item.setClickable(true);
-        item.setFocusable(true);
+        LinearLayout item = kit.row();
         LinearLayout textBox = new LinearLayout(this);
         textBox.setOrientation(LinearLayout.VERTICAL);
-        TextView main = text(title, 14, TEXT, true);
-        TextView detail = text(desc, 11, MUTED, false);
-        detail.setGravity(Gravity.TOP | Gravity.START);
+        TextView main = kit.text(title, 13.5f, kit.text, true);
+        TextView detail = kit.caption(desc);
         textBox.addView(main, matchWrap());
         LinearLayout.LayoutParams detailLp = matchWrap();
         detailLp.topMargin = dp(3);
         textBox.addView(detail, detailLp);
         item.addView(textBox, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        TextView arrow = text("›", 25, ACCENT, true);
+        TextView arrow = kit.text("›", 22, kit.accent, false);
         arrow.setGravity(Gravity.CENTER);
-        item.addView(arrow, new LinearLayout.LayoutParams(dp(28), ViewGroup.LayoutParams.MATCH_PARENT));
+        item.addView(arrow, new LinearLayout.LayoutParams(kit.dp(26), ViewGroup.LayoutParams.WRAP_CONTENT));
         item.setOnClickListener(v -> { v.animate().alpha(0.72f).setDuration(50).withEndAction(() -> { v.animate().alpha(1f).setDuration(110).start(); action.run(); }).start(); });
         card.addView(item, matchWrap());
-        View divider = new View(this);
-        divider.setBackgroundColor(Color.rgb(42, 53, 77));
+        View divider = kit.divider();
         card.addView(divider, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)));
     }
 

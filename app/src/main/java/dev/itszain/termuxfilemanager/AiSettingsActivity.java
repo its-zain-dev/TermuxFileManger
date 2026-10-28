@@ -75,6 +75,46 @@ public class AiSettingsActivity extends Activity {
         Button saveBudgets=button("حفظ ميزانيات AI",PANEL2,ACCENT);
         saveBudgets.setOnClickListener(v->{int thinking=parse(thinkingBudgetInput.getText().toString(),0,0,8192);int output=parse(outputBudgetInput.getText().toString(),2048,128,8192);int ix=Math.max(0,Math.min(thinkingLevels.length-1,thinkingLevelSpinner.getSelectedItemPosition()));AiSecureStore.settings(this).edit().putInt("thinking_budget_tokens",thinking).putInt("output_budget_tokens",output).putString("thinking_level",thinkingLevels[ix]).apply();AgentWorkspace.persistSettings(this);Toast.makeText(this,"انحفظت ميزانيات AI ومستوى التفكير",Toast.LENGTH_SHORT).show();});
         body.addView(saveBudgets,match());
+        body.addView(section("ضغط سياق المحادثة · Hard Compact"));
+        body.addView(note("قبل إرسال الطلب الأساسي، يختصر مزوّد ثانوي الذاكرة والتعليمات وسجل المحادثة في سياق مضغوط. الهدف سقف 6500 توكن للطلب الأساسي؛ لأن كل مزوّد يجزّئ العربية والتوكنات بصورة مختلفة، يفرض التطبيق أيضًا حدًا محافظًا على طول الملخص. لازم يكون للمزوّد الثانوي مفتاح API محفوظ، ويُفضّل أن يكون غير مزوّد الدردشة الأساسية."));
+        CheckBox compactEnabled = new CheckBox(this);
+        compactEnabled.setText("تفعيل الضغط التلقائي قبل كل طلب AI");
+        compactEnabled.setTextColor(TEXT);
+        compactEnabled.setButtonTintList(android.content.res.ColorStateList.valueOf(ACCENT));
+        compactEnabled.setChecked(AiSecureStore.settings(this).getBoolean("context_compact_enabled", false));
+        body.addView(compactEnabled, match());
+        Spinner compactProviderSpinner = new Spinner(this);
+        List<String> compactProviderNames = new ArrayList<>();
+        for (AiProvider p : providers) compactProviderNames.add(p.name);
+        compactProviderSpinner.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, compactProviderNames));
+        String savedCompactProvider = AiSecureStore.settings(this).getString("context_compact_provider", "gemini");
+        compactProviderSpinner.setSelection(AiProvider.indexOf(savedCompactProvider));
+        body.addView(label("المزوّد الثانوي للضغط")); body.addView(compactProviderSpinner, match());
+        EditText compactModelInput = field("اسم نموذج الضغط", false);
+        compactModelInput.setSingleLine(true);
+        compactModelInput.setText(AiSecureStore.settings(this).getString("context_compact_model_" + savedCompactProvider, AiSecureStore.getModel(this, savedCompactProvider)));
+        compactProviderSpinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+            public void onNothingSelected(android.widget.AdapterView<?> p) { }
+            public void onItemSelected(android.widget.AdapterView<?> p, View v, int pos, long id) {
+                if (pos < 0 || pos >= providers.size()) return;
+                String pid = providers.get(pos).id;
+                compactModelInput.setText(AiSecureStore.settings(AiSettingsActivity.this).getString("context_compact_model_" + pid, AiSecureStore.getModel(AiSettingsActivity.this, pid)));
+            }
+        });
+        body.addView(label("معرّف نموذج الضغط")); body.addView(compactModelInput, match());
+        Button saveCompact = button("حفظ إعدادات الضغط", PANEL2, ACCENT);
+        saveCompact.setOnClickListener(v -> {
+            int pos = Math.max(0, Math.min(providers.size() - 1, compactProviderSpinner.getSelectedItemPosition()));
+            String pid = providers.get(pos).id;
+            String cm = compactModelInput.getText().toString().trim();
+            if (cm.isEmpty()) { alert("اكتب معرّف نموذج الضغط."); return; }
+            AiSecureStore.settings(this).edit().putBoolean("context_compact_enabled", compactEnabled.isChecked())
+                    .putString("context_compact_provider", pid).putString("context_compact_model_" + pid, cm).apply();
+            AgentWorkspace.persistSettings(this);
+            Toast.makeText(this, "انحفظت إعدادات الضغط. تأكد من حفظ مفتاح API للمزوّد الثانوي.", Toast.LENGTH_LONG).show();
+        });
+        body.addView(saveCompact, match());
+
         buildAgentOptions(body);
         body.addView(section("Termux"));body.addView(note("إدارة الحزم والمكتبات وتشغيل الأوامر تتم من خلال Termux RUN_COMMAND، بصلاحيات مستخدم Termux فقط. الأوامر المؤثرة تعرض تأكيدًا قبل تنفيذها."));Button link=button("إعداد الربط مع Termux",PANEL2,ACCENT);link.setOnClickListener(v->showTermuxLinkDialog());body.addView(link,match());Button appPerm=button("فتح إعدادات صلاحيات التطبيق",PANEL2,TEXT);appPerm.setOnClickListener(v->{try{startActivity(new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,Uri.parse("package:"+getPackageName())));}catch(Exception e){alert("افتح إعدادات أندرويد > التطبيقات > Termux File Manager.");}});body.addView(appPerm,match());Button tools=button("فتح مركز الأدوات",PANEL2,TEXT);tools.setOnClickListener(v->startActivity(new Intent(this,ToolsActivity.class)));body.addView(tools,match());Button sessions=button("جلسات Terminal و TUI",PANEL2,TEXT);sessions.setOnClickListener(v->startActivity(new Intent(this,TerminalSessionsActivity.class)));body.addView(sessions,match());
         body.addView(section("مظهر التطبيق"));themeSpinner=new Spinner(this);String[] themeLabels={"Midnight — داكن أزرق","AMOLED — أسود","Light — فاتح"};themeSpinner.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,themeLabels));String tn=UiTheme.getName(this);themeSpinner.setSelection("light".equals(tn)?2:("amoled".equals(tn)?1:0));body.addView(themeSpinner,match());Button themeSave=button("تطبيق المظهر",PANEL2,ACCENT);themeSave.setOnClickListener(v->{int i=themeSpinner.getSelectedItemPosition();UiTheme.setName(this,i==2?"light":(i==1?"amoled":"midnight"));Toast.makeText(this,"تم حفظ المظهر. ارجع للشاشات لتطبيقه.",Toast.LENGTH_SHORT).show();recreate();});body.addView(themeSave,match());

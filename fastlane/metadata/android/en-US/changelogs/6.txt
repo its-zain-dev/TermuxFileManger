@@ -1,0 +1,1 @@
+Version 0.5.0: Native ChatGPT tool calls, a unified assistant tool registry, approval controls for file and shell actions, searchable tools hub, persistent tool results, and safer recovery after interruption.

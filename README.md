@@ -238,3 +238,7 @@ The project uses the Gradle 8.9 wrapper, Room, DataStore, OkHttp, and a Termux J
   <br />
   <sub>Native Android tooling for Termux · Open source · English and Arabic</sub>
 </div>
+
+## License and F-Droid preparation
+
+Termux File Manager's original project code and artwork are licensed under **[GNU GPL v3 (GPL-3.0-only)](LICENSE)** unless otherwise noted. See [COPYRIGHT](COPYRIGHT) for third-party notices, [privacy information](docs/PRIVACY.md), and the [F-Droid preparation checklist](docs/FDROID_SUBMISSION.md). Release builds from GitHub and F-Droid may use different signing keys and cannot update one another in-place.

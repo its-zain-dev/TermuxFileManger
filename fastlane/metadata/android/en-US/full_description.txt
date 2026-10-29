@@ -1,0 +1,25 @@
+<b>Termux File Manager (TFM)</b> is an open-source Android workspace for the Termux terminal environment. Browse files, edit code, run reviewed commands and manage developer tools from a native interface.
+
+<b>File management</b>
+• Browse Termux directories and shared storage (when configured).
+• Search files, sort, switch between list and grid views, mark favorites and see recent folders.
+• Copy, move and delete multiple items with conflict handling and operation history.
+
+<b>Code editor and terminal</b>
+• Edit UTF-8 text files with line numbers, search, undo/redo and local drafts (up to 256 KiB).
+• Use named working directories, run commands and view command output and exit status.
+• Launch interactive terminal programs inside Termux.
+• Access developer package managers, diagnostics and archive utilities.
+
+<b>Optional AI assistant</b>
+• Use chats linked to Termux sessions and review shell/file actions before execution by default.
+• Configure supported AI provider endpoints with your own API keys, or use supported ChatGPT account sign-in.
+• Enable web research and import agent skills when you choose.
+• Some AI providers are proprietary network services and may require accounts, payment or other conditions. AI is optional; file and command features work without an AI account.
+
+<b>Setup</b>
+Install and open Termux separately, then use "Connect to Termux" in TFM and follow the permission/setup steps. TFM itself supports Android 6+, but current supported Termux releases require Android 7+ for the backend. No root is required.
+
+The app supports English and Arabic, phone and tablet layouts, and light, dark and AMOLED themes. It does not bundle the Termux environment or bypass Android permissions.
+
+<b>Privacy:</b> File operations and history are local; when you deliberately use an AI provider, data in the request and explicitly attached content are sent to that configured network service. See the project's privacy document for details.

@@ -29,11 +29,11 @@ public final class AiSecureStore {
         return kg.generateKey();
     }
     public static void saveKey(Context c,String provider,String value) throws Exception {
-        if(value==null||value.trim().isEmpty()){p(c).edit().remove("key_"+provider).apply();return;}
+        if(value==null||value.trim().isEmpty()){if(!p(c).edit().remove("key_"+provider).commit())throw new java.io.IOException("Credential storage failed");return;}
         Cipher cipher=Cipher.getInstance("AES/GCM/NoPadding"); cipher.init(Cipher.ENCRYPT_MODE,key());
         byte[] encrypted=cipher.doFinal(value.trim().getBytes(StandardCharsets.UTF_8));
         String packed=Base64.encodeToString(cipher.getIV(),Base64.NO_WRAP)+":"+Base64.encodeToString(encrypted,Base64.NO_WRAP);
-        p(c).edit().putString("key_"+provider,packed).apply();
+        if(!p(c).edit().putString("key_"+provider,packed).commit())throw new java.io.IOException("Credential storage failed");
     }
     public static String getKey(Context c,String provider) throws Exception {
         String packed=p(c).getString("key_"+provider,""); if(packed.isEmpty()) return "";

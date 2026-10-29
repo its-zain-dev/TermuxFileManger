@@ -10,25 +10,22 @@
     </queries>
 
     <application
+        android:name=".TfmApplication"
         android:allowBackup="false"
-        android:label="Termux File Manager"
-        android:icon="@android:drawable/ic_menu_manage"
+        android:label="@string/app_name"
+        android:icon="@drawable/ic_launcher"
         android:theme="@style/AppTheme"
         android:supportsRtl="true"
         android:usesCleartextTraffic="false">
         <activity
             android:name=".MainActivity"
-            android:exported="true"
-            android:configChanges="keyboardHidden|orientation|screenSize">
+            android:windowSoftInputMode="adjustResize"
+            android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <activity android:name=".ToolsActivity" android:exported="false" android:label="مركز أدوات Termux" android:configChanges="keyboardHidden|orientation|screenSize" />
-        <activity android:name=".AiAssistantActivity" android:exported="false" android:label="AI Assistant Agent" />
-        <activity android:name=".AiSettingsActivity" android:exported="false" android:label="AI &amp; App Settings" />
-        <activity android:name=".TerminalSessionsActivity" android:exported="false" android:label="Terminal Sessions" />
         <activity android:name=".ScreenCaptureActivity" android:exported="false" android:label="TFM Screen Capture" />
         <activity
             android:name=".ProcessTextActivity"

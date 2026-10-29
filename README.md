@@ -1,251 +1,104 @@
-<div align="center">
+# Termux File Manager · TFM
 
-# Termux File Manager (TFM)
+A native Android workspace for Termux: files, an editor, saved terminal sessions, developer utilities and a multi-provider AI assistant.
 
-### A native Android file manager and AI coding companion for Termux
+**0.4.0 rebuild:** Kotlin, Jetpack Compose and Material 3; English and Arabic; phone and tablet layouts; light, dark and AMOLED themes. Android 6.0+; no root required.
 
-Browse files, manage projects, run approved shell commands, install developer tools, and connect AI providers — directly from your Android phone or tablet.
+## Workspace
 
-<p>
-  <a href="https://github.com/its-zain-dev/TermuxFileManger/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/its-zain-dev/TermuxFileManger?display_name=tag&label=release&color=35C9A5"></a>
-  <a href="https://github.com/its-zain-dev/TermuxFileManger/actions/workflows/android.yml"><img alt="Android release build" src="https://github.com/its-zain-dev/TermuxFileManger/actions/workflows/android.yml/badge.svg"></a>
-  <a href="https://github.com/its-zain-dev/TermuxFileManger/releases"><img alt="GitHub downloads" src="https://img.shields.io/github/downloads/its-zain-dev/TermuxFileManger/total?label=downloads&color=5271FF"></a>
-  <a href="https://github.com/its-zain-dev/TermuxFileManger"><img alt="Stars" src="https://img.shields.io/github/stars/its-zain-dev/TermuxFileManger?style=flat&color=F5B942"></a>
-  <img alt="Android" src="https://img.shields.io/badge/Android-6.0%2B-3DDC84?logo=android&logoColor=white">
-  <img alt="Java" src="https://img.shields.io/badge/Native_Java-ED8B00?logo=openjdk&logoColor=white">
-</p>
+- **Files:** list/grid, breadcrumbs, editable paths, recursive search, hidden files, sorting, favorites and recent folders. Multi-select copy/move/delete with per-item results, skip/rename conflicts and stopping remaining items. Persistent operation history survives leaving the screen.
+- **Editor:** full-screen UTF-8 editing up to 256 KiB, line numbers, find, undo/redo and local drafts. Writes preserve permissions and line endings, use atomic replacement, and reject an externally modified file rather than overwriting it.
+- **Terminal:** named working directories, multiline commands, stdout/stderr and exit status, command review and broadcasting to saved sessions. Interactive TUI programs open in Termux.
+- **Assistant:** separate conversations linked to terminal sessions; streamed text and provider-exposed reasoning summaries; image attachments and explicit screen capture; reviewed tool actions; optional automatic execution; web research, imported `SKILL.md` skills and durable Termux workspace memory.
+- **Tools:** Termux packages; pip, npm, cargo, gem, Go, Composer and LuaRocks; runtime/storage diagnostics; HTTPS downloads; tar/zip utilities.
 
-<p>
-  <a href="https://github.com/its-zain-dev/TermuxFileManger/releases/latest"><strong>Download latest build</strong></a>
-  · <a href="https://github.com/its-zain-dev/TermuxFileManger/issues">Report a bug</a>
-  · <a href="https://github.com/its-zain-dev/TermuxFileManger/actions">Build history</a>
-</p>
+Providers: Gemini, Anthropic, OpenAI, OpenRouter, Groq, Mistral, Cohere, DeepSeek, xAI and Together AI. Configure your own API key, model ID and HTTPS endpoint. Provider availability, costs and limits depend on your account; model IDs remain editable.
 
-</div>
+**ChatGPT plan:** Settings → **Continue with ChatGPT** opens OpenAI's system-browser sign-in and consent flow. This uses the official [open-source Sign in with ChatGPT flow](https://developers.openai.com/siwc/token-sharing-open-source/sign-in), with dynamic public-client registration, PKCE and no developer secret or API key. Models come from the signed-in account's catalog; streamed Responses requests consume that account's authorized plan allowance. Account/workspace policy, app limits and the preview's supported models still apply. View usage from the Settings link to ChatGPT. Browser login and consent must be completed by the account owner.
 
----
+Each registration keeps its issued client ID and validated identity separate. Tokens are encrypted with Android Keystore, refreshes are serialized and rotating tokens are persisted together. Sign-out stops active requests, attempts session revocation and removes local tokens while retaining the registration for subsequent sign-in.
 
-## What is Termux File Manager?
+## Assistant tools (0.5)
 
-**Termux File Manager (TFM)** is a native Java Android app that provides a graphical workspace for [Termux](https://termux.dev/). It helps Android users browse and manage files, edit code, run shell commands, work with programming runtimes, and use AI coding assistants without needing a desktop computer.
+ChatGPT uses native Responses function calls grouped in the `termux` namespace. Calls and results are paired by `call_id`, persisted locally and replayed as context without re-executing them. Other providers retain the text-action protocol, including compatibility with JSON surrounded by explanatory prose.
 
-Instead of doing every file operation in a terminal, use a visual file manager alongside Termux's real command-line environment. The optional AI assistant supports several API providers and can help reason about projects and terminal output.
+The shared tool registry covers app/model inspection, file listing/reading/search, guarded file updates/creation, project inspection, Git status, reviewed shell commands, web research, memory and skills. `app_info` reports the configured model ID actually sent with the request; it does not read credentials or claim to attest the provider's internal model weights. Read-only tools run directly; writes and shell commands require review by default. Existing explicit auto-execution settings are retained. Greetings do not authorize shell execution.
 
-> **No root required.** TFM does not bypass Android's sandbox. Commands run with Termux's own user permissions, subject to Android and Termux configuration.
+The tools hub supports search, categories and request drafts. Requests are shown as status cards in the conversation with review controls and expandable results. Tool results feed the next assistant turn automatically; the old shell-only auto-analysis toggle is retired. Stopping the agent or restarting the app does not replay interrupted calls.
 
-## Features
+## Connect Termux
 
-<table>
-<tr>
-<td width="50%" valign="top">
+1. Install Termux from [termux.dev](https://termux.dev/) and open it once.
+2. Open TFM → **Connect to Termux** and grant **Run commands in Termux environment**.
+3. Copy the displayed setup command into Termux. It enables `allow-external-apps=true` and installs Python and curl.
+4. Restart Termux, then select **Check connection**.
+5. For shared Android storage, run `termux-setup-storage` in Termux and grant its storage permission. TFM accesses that storage through Termux, within Android's sandbox.
+6. Configure an AI provider in **Settings** if you want the assistant. File operations do not require an AI key.
 
-### 📁 Graphical file manager
+The TFM APK supports Android 6/API 23 and newer; current supported Termux releases require Android 7 or newer for the file/command backend.
 
-- Browse folders and hidden files.
-- Search for files and directories.
-- Create, edit, copy, move, rename, and delete items.
-- Inspect metadata and change file permissions.
-- Manage archives and download files over HTTPS.
-- Edit UTF-8 text files up to 256 KiB in the built-in editor.
+English/Arabic follows the device by default and can be changed in Settings. Paths, source code and terminal output retain left-to-right direction inside the Arabic interface.
 
-</td>
-<td width="50%" valign="top">
+## Upgrade and data
 
-### 💻 Termux command workspace
+Keep the same application ID **and signing key** when updating an installation. On first launch, the app transactionally imports v0.3 conversations, messages and sessions into Room. IDs, conversation/session associations, custom metadata and auto-execution overrides are preserved. Existing preference files remain intact; malformed imports stop with a recoverable error instead of silently resetting data.
 
-- Run one-line and multi-line shell commands in a selected working directory.
-- View command output and exit status.
-- Save named work sessions with recent output.
-- Open interactive TUI programs in Termux.
-- Use Android's **RUN CODE ON TERMUX** selected-text action.
-- Review proposed commands before running them by default.
+Preferences migrate to DataStore. Provider codecs and the Termux workspace format use a compatibility preference mirror. API keys remain in the original encrypted store and use the existing Android Keystore alias `tfm.ai.keys.aesgcm.v1`; keys are not exported or re-encrypted during migration.
 
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
+Termux files under `~/.TFM-setting/` retain their names and semantics, including `config.json`, `Memory.md`, `instructions.md` and the historical `system-propmet.md` spelling.
 
-### 🤖 Multi-provider AI assistant
+Commands are recorded before dispatch and results are committed before the UI observes them. Rotation and navigation do not own a running command. On process recovery, partial AI messages are marked interrupted and commands are **not replayed**. A pending command may still be running in Termux; its eventual callback updates the stored result. Stopping the assistant cancels its HTTP call and prevents subsequent actions; it does not claim to kill an already dispatched shell process.
 
-Configure a separate API provider, model, HTTPS endpoint, and key as needed:
+## Build and validate
 
-- Google Gemini
-- Anthropic Claude
-- OpenAI
-- OpenRouter
-- Groq
-- Mistral AI
-- Cohere
-- DeepSeek
-- xAI
-- Together AI
+Requirements: **JDK 17**, Android SDK platform **35**, and Python 3 for bridge tests. The checked-in Gradle **8.9** wrapper has a distribution checksum. Dependencies use fixed versions. `minSdk=23`; `targetSdk=32` is retained for the current Termux integration, so this release is not a Google Play target-SDK migration.
 
-</td>
-<td width="50%" valign="top">
-
-### 🛠️ Developer tools
-
-- Helpers for Termux packages and language package managers.
-- Python `pip`, Node.js `npm`, Rust `cargo`, Ruby `gem`, and Go tools.
-- Runtime and compiler inventory.
-- System and storage diagnostics.
-- Language-based runner suggestions for common scripts and source files.
-- Midnight/dark, AMOLED, and light themes.
-
-</td>
-</tr>
-</table>
-
-## AI coding assistant
-
-TFM's AI assistant is designed for practical work with Termux projects, not just general chat.
-
-- Select a provider per conversation and use a custom model ID or HTTPS endpoint.
-- Store API keys encrypted with Android Keystore-backed AES-GCM encryption.
-- Keep separate named chat histories and link chats to saved terminal sessions.
-- Fetch model lists where supported or enter model IDs manually.
-- Configure local request limits and delays to reduce accidental repeated calls.
-- Optionally send command output to the assistant for follow-up diagnosis.
-- Commands proposed by AI require user approval by default. Enabling unattended execution changes this safety boundary.
-- Use web research support for tasks that require external verification.
-
-Model availability, multimodal inputs, streaming support, token/context limits, rate limits, and costs are controlled by each provider and can change. TFM's local rate controls do not override provider-side limits and do not guarantee free usage.
-
-### Official AI API documentation
-
-| Provider | Documentation |
-|---|---|
-| Google Gemini | [Gemini API](https://ai.google.dev/gemini-api/docs) |
-| Anthropic Claude | [Messages API](https://docs.anthropic.com/en/api/messages) |
-| OpenAI | [API documentation](https://developers.openai.com/api/docs) |
-| OpenRouter | [Chat Completions API](https://openrouter.ai/docs/api-reference/chat-completion) |
-| Groq | [API reference](https://console.groq.com/docs/api-reference) |
-| Mistral AI | [Chat API](https://docs.mistral.ai/api/endpoint/chat) |
-| Cohere | [Chat API](https://docs.cohere.com/reference/chat) |
-| DeepSeek | [Chat Completions API](https://api-docs.deepseek.com/api/create-chat-completion) |
-| xAI | [API reference](https://docs.x.ai/developers/rest-api-reference/inference/chat-completions) |
-| Together AI | [OpenAI-compatible API](https://docs.together.ai/docs/openai-api-compatibility) |
-
-## Install TFM on Android
-
-1. Open the [latest GitHub Release](https://github.com/its-zain-dev/TermuxFileManger/releases/latest) and download its Release APK.
-2. Install it through Android's package installer. Android may ask you to allow installs from the app used to download the file.
-3. Install Termux, then open TFM and select the Termux link/setup option.
-4. Follow the displayed steps to enable external command requests, restart Termux, and grant Android's **Run commands in Termux environment** permission if shown.
-5. To use AI, open **AI & App Settings**, select a provider, set a supported model ID, and save your own API key.
-
-**APK signing:** If a release asset is named `-unsigned.apk`, it is a Release build that has not been signed and cannot be installed as a normal Android app until signed. For installable, upgrade-compatible builds, configure the persistent signing secrets in [Automatic Release Builds](#automatic-release-builds). Never download or install APKs from sources you do not trust.
-
-## Requirements
-
-| Requirement | Details |
-|---|---|
-| Android | Android 6.0+ (API 23 or newer) |
-| App technology | Native Android Java |
-| Terminal | Termux installed; Termux 0.109+ recommended |
-| Command access | Termux external command requests enabled and Android permission granted where required |
-| Network | Internet for AI APIs and HTTPS downloads |
-| AI usage | Your own API key for each hosted provider you choose to use |
-
-TFM does not bundle API credentials or AI usage credits.
-
-## Automatic Release Builds
-
-GitHub Actions builds the **Release variant only** on every push to `main` and on manual workflow runs. Pull requests targeting `main` also build the Release variant as a validation check, but do not publish a Release. Successful push/manual builds publish a uniquely tagged GitHub Release containing the APK and a SHA-256 checksum. The workflow does **not** build or upload Debug APKs.
-
-### Configure persistent APK signing (recommended)
-
-A production Android APK should use a persistent signing key. Without signing secrets, Gradle generates `app-release-unsigned.apk`. GitHub Actions will still publish the Release build and mark the asset as unsigned.
-
-Configure these repository Actions secrets to have the workflow sign release APKs:
-
-| Repository secret | Description |
-|---|---|
-| `TFM_RELEASE_KEYSTORE_BASE64` | Base64-encoded Java keystore file |
-| `TFM_RELEASE_STORE_PASSWORD` | Keystore password |
-| `TFM_RELEASE_KEY_ALIAS` | Signing key alias |
-| `TFM_RELEASE_KEY_PASSWORD` | Signing key password |
-
-Create and safeguard your own release keystore. Open **Settings → Secrets and variables → Actions → New repository secret** to add each value. Never commit a keystore or passwords. Back up the keystore securely: losing it can prevent future versions from updating an already installed app.
-
-### Build pipeline
-
-1. Checks out the repository and configures Java 17 and Gradle.
-2. Runs `clean assembleRelease` — not `assembleDebug`.
-3. Collects the Release APK and produces a SHA-256 checksum.
-4. Publishes both files to a uniquely tagged GitHub Release on pushes to `main` and manual runs.
-5. Leaves the workflow logs in the [Actions tab](https://github.com/its-zain-dev/TermuxFileManger/actions).
-
-## Build locally
-
-With Java 17, Android SDK tooling, and Gradle available, run from the repository root:
-
-```bash
-gradle --no-daemon clean assembleRelease
+```sh
+python3 -m unittest discover -s tests -v
+python3 scripts/release.py --build
 ```
 
-The APK is written to `app/build/outputs/apk/release/`. If your checkout includes a Gradle wrapper, prefer `./gradlew --no-daemon clean assembleRelease`.
+Release APK: `app/build/outputs/apk/release/`. Unit tests cover legacy migration/rollback, callback persistence/idempotency, drafts, provider streaming/authentication/cancellation, and agent actions. Python tests exercise real filesystem operations, including 10,000 entries, Unicode, symlinks, conflicts, encoding limits and external edits.
 
-## Security and privacy
+With an emulator or test device:
 
-- TFM does not request root access or bypass Android's app sandbox.
-- Shell commands run as the Termux user. Commands can still delete or overwrite files; review commands before approval.
-- API keys are stored encrypted with a key backed by Android Keystore.
-- Chat content and intentionally attached inputs are sent to the configured AI provider when a request is made. Provider logging, retention, privacy, and billing depend on that provider's terms.
-- Never paste API keys, passwords, access tokens, or credentials into chats or bug reports.
-- HTTPS encrypts traffic but does not prove a custom endpoint belongs to the provider you intended. Only use endpoints you trust.
-- Keep backups of important projects and the signing keystore.
+```sh
+./gradlew connectedDebugAndroidTest
+```
 
-## Known limitations
+Instrumented tests exercise navigation, locale/theme recreation and, when Termux is configured, actual file/command/Keystore round trips in a disposable directory. Debug builds are for local testing; distributed artifacts are Release variants.
 
-- TFM is a graphical companion to Termux, not a root file manager.
-- Access outside Termux depends on Android storage permissions and Termux storage setup.
-- Interactive TUI tools such as `nano`, `vim`, `top`, and `htop` open in Termux. TFM cannot embed Termux's actual interactive PTY view inside a normal Android Activity.
-- The built-in editor is intended for UTF-8 text files up to 256 KiB; use a terminal editor for larger files.
-- Provider-specific API features and token limits vary by model.
+## APK signing and CI
 
-## Troubleshooting
+`scripts/release.py --build` creates a signing identity once in the ignored, owner-only `.signing/` directory and reuses it for later builds. It runs JVM tests, Android Lint and the signed Release build. An existing identity with a missing keystore is an error, never a reason to silently rotate the key. Preserve that directory privately for future updates; it is never committed or uploaded as a public artifact.
 
-<details>
-<summary><strong>TFM cannot run commands in Termux</strong></summary>
+The same script can provision repository Actions Secrets automatically with `--publish-secrets`, using an already authenticated GitHub CLI with permission to manage repository secrets. It checks authorization first and refuses to overwrite an existing signing identity. A normal workflow `GITHUB_TOKEN` cannot create repository secrets. If GitHub denies access, local signed builds still work, but secure repository persistence is not completed.
 
-Check that Termux is installed, external command requests are enabled in `~/.termux/termux.properties`, Termux has been fully restarted, and Android granted the required command permission.
+The provisioning command stores these four secrets without printing their values:
 
-</details>
+- `TFM_RELEASE_KEYSTORE_BASE64`
+- `TFM_RELEASE_STORE_PASSWORD`
+- `TFM_RELEASE_KEY_ALIAS`
+- `TFM_RELEASE_KEY_PASSWORD`
 
-<details>
-<summary><strong>An AI request returns HTTP 429</strong></summary>
+GitHub Actions runs bridge/JVM tests, Lint and the Release build. Pull requests upload validation reports and a review artifact; without signing secrets that artifact is unsigned. Pushes to `main` and manual runs publish an APK and checksum only when persistent signing is configured and APK signature verification passes. They refuse to publish an unsigned APK.
 
-The provider's rate or token limit was reached. Wait for the provider's retry period, reduce conversation size, select another supported model/provider, or review the limits in your provider account.
+Direct Gradle builds also accept `TFM_RELEASE_KEYSTORE_PATH` plus the three password/alias variables. Without signing configuration, direct Gradle output is unsigned. A newly generated key cannot update an app signed by an older, different key. Keys and passwords must never be committed.
 
-</details>
+## Architecture
 
-<details>
-<summary><strong>The APK will not install</strong></summary>
+The single `app` module is organized by behavior:
 
-Check whether the release asset is marked `unsigned`, verify the Android minimum version, and confirm you are not installing an APK signed with a different key over an existing installation.
+- `core`: typed file/command/AI interfaces and models.
+- `data`: Room, transactional legacy import, DataStore, persistent Termux dispatch and OkHttp provider transport.
+- `features`: file/editor/workspace state and application-scoped agent orchestration.
+- `ui`: Compose screens, localization and shared design components.
+- `assets/file_bridge.py`: independently testable JSON protocol v1, executed **inside Termux** through `RUN_COMMAND` with JSON on stdin.
 
-</details>
+The small Java compatibility components retain the existing provider payloads, Keystore format, skill/workspace semantics and MediaProjection flow; obsolete programmatic UI Activities and tracked `.bak` copies have been removed.
 
-<details>
-<summary><strong>A file or folder cannot be opened</strong></summary>
+## Boundaries
 
-Check the path, file permissions, Android storage access, and whether the target is readable by Termux.
+TFM cannot bypass Android storage permissions and does not bundle a PTY or a Termux environment. The editor intentionally rejects binary/non-UTF-8 files and files above 256 KiB. Recursive search reports when its 5,000-match cap is reached. Batch cancellation stops later items; the current item may finish. Shell commands and AI tools run with Termux's user permissions. Provider requests send the conversation and explicitly attached content to the configured endpoint. No analytics or server account was added.
 
-</details>
-
-## Contributing and bug reports
-
-Open an [issue](https://github.com/its-zain-dev/TermuxFileManger/issues) with the TFM version, Android version, reproduction steps, and relevant sanitized logs. Remove keys, passwords, tokens, personal files, and other private data before posting logs.
-
-For code contributions, open a pull request against `main`. GitHub Actions validates the Release build for pull requests and publishes Releases on pushes to `main`.
-
----
-
-<div align="center">
-
-**Termux File Manager (TFM)** · Android GUI file manager · Termux development workspace · AI coding assistant
-
-<sub>Built for developers who want to manage files, work with Termux, and use AI tools directly on Android.</sub>
-
-</div>
+See [the Arabic guide](دليل-الاستخدام-عربي.md) and [validation notes](docs/VALIDATION.md).

@@ -19,6 +19,7 @@ public final class AiProvider {
         ALL.add(new AiProvider("deepseek","DeepSeek","https://api.deepseek.com/chat/completions","deepseek-v4-pro","https://api-docs.deepseek.com/api/create-chat-completion","openai"));
         ALL.add(new AiProvider("xai","xAI","https://api.x.ai/v1/chat/completions","grok-4.1-fast","https://docs.x.ai/developers/rest-api-reference/inference/chat-completions","openai"));
         ALL.add(new AiProvider("together","Together AI","https://api.together.xyz/v1/chat/completions","meta-llama/Llama-3.3-70B-Instruct-Turbo","https://docs.together.ai/docs/openai-api-compatibility","openai"));
+        ALL.add(new AiProvider("chatgpt","ChatGPT plan","https://api.openai.com/v1/responses","","https://developers.openai.com/siwc/token-sharing-open-source","chatgpt_plan"));
     }
     public static List<AiProvider> all(){ return new ArrayList<>(ALL); }
     public static AiProvider byId(String id){ for(AiProvider p:ALL) if(p.id.equals(id)) return p; return ALL.get(0); }

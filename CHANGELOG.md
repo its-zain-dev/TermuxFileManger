@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.5.0
+
+- Added native ChatGPT function calling with a namespaced tool registry, durable call/result pairing and interruption recovery.
+- Added 13 assistant tools, including authoritative app/model inspection and guarded file/project helpers.
+- Fixed legacy actions embedded in prose or code fences; greetings cannot trigger tools that access Termux.
+- Rebuilt the tools hub with searchable categories and editable assistant request drafts.
+- Added tool request/result cards, persisted execution states and in-conversation approval controls.
+- Replaced the shell-only auto-analysis toggle with automatic result handoff; execution approval remains separate.
+
+## 0.4.1
+
+- Resize the window for the keyboard, consume Scaffold insets once, and keep the tablet conversation full-height.
+- Parse named SSE events and completed JSON Responses, retain server error details, and stop reading after completion.
+- Exclude empty failed assistant messages from subsequent requests.
+
+## 0.4.0
+
+- Rebuilt the interface in Kotlin, Jetpack Compose and Material 3, with English/Arabic RTL, four themes and adaptive phone/tablet navigation.
+- Added paginated file browsing, search, selection, favorites/recent places, sorting, list/grid layouts and batch conflict handling.
+- Added an editor with drafts, undo/redo, search and protection against overwriting external changes.
+- Moved conversations, sessions, commands and drafts to Room with transactional legacy import; moved preferences to DataStore while retaining Keystore compatibility.
+- Added cancellable streamed provider requests, persistent command results and application-scoped assistant execution.
+- Added official ChatGPT public-client sign-in with account selection, PKCE, validated identity, encrypted rotating tokens, plan model discovery and streamed Responses requests.
+- Added automatic persistent local release signing, secure GitHub Secrets provisioning when authorized, and a publication check that rejects unsigned releases.
+- Added filesystem, persistence, provider, OAuth and UI tests; retained Termux tools, skills, memory and screen capture.
+
 ## 0.3.0
 
 - Added a single, understated AI Assistant entry point and persistent multi-chat UI.

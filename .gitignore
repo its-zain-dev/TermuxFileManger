@@ -6,3 +6,8 @@ local.properties
 .DS_Store
 *.jks
 *.keystore
+*.bak
+__pycache__/
+.pytest_cache/
+artifacts/
+.signing/

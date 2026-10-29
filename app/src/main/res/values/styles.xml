@@ -28,6 +28,11 @@
         <item name="android:windowExitAnimation">@anim/tfm_dialog_out</item>
     </style>
 
+    <style name="TfmSheetAnim" parent="@android:style/Animation.Dialog">
+        <item name="android:windowEnterAnimation">@anim/tfm_sheet_in</item>
+        <item name="android:windowExitAnimation">@anim/tfm_sheet_out</item>
+    </style>
+
     <style name="TfmDialogDark" parent="android:style/Theme.Material.Dialog.Alert">
         <item name="android:windowAnimationStyle">@style/TfmDialogAnim</item>
         <item name="android:windowBackground">@android:color/transparent</item>

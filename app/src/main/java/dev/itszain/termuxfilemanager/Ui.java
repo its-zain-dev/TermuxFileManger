@@ -18,6 +18,7 @@ import android.graphics.Rect;
 import android.graphics.Shader;
 import android.graphics.SweepGradient;
 import android.graphics.Typeface;
+import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.InsetDrawable;
@@ -39,6 +40,7 @@ import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -629,6 +631,87 @@ public final class Ui {
             });
             return d;
         }
+    }
+
+    // ───────────────────────── action sheet ─────────────────────────
+    public interface Pick { void on(int which); }
+
+    /** Floating bottom sheet with icon rows; replaces plain setItems() dialogs. */
+    public static android.app.Dialog actionSheet(final Activity a, String title, String subtitle, String[] labels, int[] icons, int dangerIndex, final Pick pick) {
+        final UiTheme t = UiTheme.get(a);
+        final android.app.Dialog d = new android.app.Dialog(a);
+        d.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        LinearLayout box = new LinearLayout(a);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(a, 18), dp(a, 10), dp(a, 18), dp(a, 16));
+        box.setBackground(shape(t.light ? Color.WHITE : t.panel, dpf(a, 28), t.glassStroke, Math.max(1, dp(a, 1f))));
+        View grab = new View(a);
+        grab.setBackground(shape(alpha(t.muted, 110), dpf(a, 3), 0, 0));
+        LinearLayout.LayoutParams glp = new LinearLayout.LayoutParams(dp(a, 40), dp(a, 4));
+        glp.gravity = Gravity.CENTER_HORIZONTAL;
+        glp.bottomMargin = dp(a, 12);
+        box.addView(grab, glp);
+        TextView ti = text(a, title, 17, t.text, true);
+        ti.setSingleLine(true);
+        ti.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);
+        box.addView(ti);
+        if (subtitle != null && !subtitle.isEmpty()) {
+            TextView st = text(a, subtitle, 11, t.muted, false);
+            st.setSingleLine(true);
+            st.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);
+            st.setPadding(0, dp(a, 3), 0, dp(a, 10));
+            box.addView(st);
+        } else {
+            ti.setPadding(0, 0, 0, dp(a, 10));
+        }
+        LinearLayout list = new LinearLayout(a);
+        list.setOrientation(LinearLayout.VERTICAL);
+        for (int i = 0; i < labels.length; i++) {
+            final int index = i;
+            int tint = i == dangerIndex ? t.danger : t.accent;
+            LinearLayout row = new LinearLayout(a);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(dp(a, 6), dp(a, 6), dp(a, 10), dp(a, 6));
+            row.setBackground(new RippleDrawable(ColorStateList.valueOf(alpha(t.accent, 50)), null, shape(Color.WHITE, dpf(a, 18), 0, 0)));
+            ImageView tile = new ImageView(a);
+            tile.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+            int tp = dp(a, 10);
+            tile.setPadding(tp, tp, tp, tp);
+            tile.setImageDrawable(Icons.get(a, icons != null && i < icons.length ? icons[i] : Icons.CHEVRON, tint));
+            tile.setBackground(shape(alpha(tint, 34), dpf(a, 14), 0, 0));
+            row.addView(tile, new LinearLayout.LayoutParams(dp(a, 42), dp(a, 42)));
+            TextView lb = text(a, labels[i], 15, i == dangerIndex ? t.danger : t.text, false);
+            LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+            llp.setMarginStart(dp(a, 14));
+            row.addView(lb, llp);
+            row.setClickable(true);
+            row.setFocusable(true);
+            press(row);
+            row.setOnClickListener(v -> { d.dismiss(); pick.on(index); });
+            LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            rlp.bottomMargin = dp(a, 2);
+            list.addView(row, rlp);
+            enter(row, i + 1);
+        }
+        ScrollView sv = new ScrollView(a);
+        sv.setVerticalScrollBarEnabled(false);
+        sv.addView(list);
+        box.addView(sv, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        FrameLayout holder = new FrameLayout(a);
+        holder.setPadding(dp(a, 10), dp(a, 10), dp(a, 10), dp(a, 10));
+        holder.addView(box);
+        d.setContentView(holder);
+        Window w = d.getWindow();
+        if (w != null) {
+            w.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            w.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            w.setGravity(Gravity.BOTTOM);
+            w.setWindowAnimations(R.style.TfmSheetAnim);
+            w.setDimAmount(0.6f);
+        }
+        d.show();
+        return d;
     }
 
     // ───────────────────────── custom views ─────────────────────────

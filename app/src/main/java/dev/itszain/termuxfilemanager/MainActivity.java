@@ -29,6 +29,9 @@ import android.widget.BaseAdapter;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
+import android.widget.FrameLayout;
+import android.widget.HorizontalScrollView;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.ScrollView;
@@ -63,6 +66,13 @@ public class MainActivity extends Activity {
     private TextView hiddenButton;
     private Button moreButton;
     private ListView listView;
+    private UiTheme theme;
+    private Ui.StatusPill pill;
+    private LinearLayout crumbs;
+    private HorizontalScrollView crumbScroll;
+    private View skeleton, emptyView;
+    private int animatedUpTo = -1;
+    private int listGen = 0;
     private FileAdapter adapter;
     private final ArrayList<JSONObject> files = new ArrayList<>();
     private final Map<Integer, ResultCallback> callbacks = new HashMap<>();
@@ -401,138 +411,118 @@ except Exception as e:
     }
 
     private void buildUi() {
+        theme = UiTheme.get(this);
         root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(BG);
-        root.setPadding(dp(16), dp(10), dp(16), dp(10));
-        setContentView(root);
+        root.setPadding(dp(16), dp(10), dp(16), dp(8));
+        FrameLayout screen = Ui.setContent(this, theme, root);
 
-        LinearLayout header = new LinearLayout(this);
-        header.setGravity(Gravity.CENTER_VERTICAL);
-        header.setOrientation(LinearLayout.HORIZONTAL);
-        LinearLayout heading = new LinearLayout(this);
-        heading.setOrientation(LinearLayout.VERTICAL);
-        heading.addView(text("TFM Workspace", 21, TEXT, true));
-        heading.addView(text("مساحة عمل Termux", 11, MUTED, false));
-        header.addView(heading, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        Button menu = button("⋮", PANEL, TEXT);
-        menu.setTextSize(22);
-        header.addView(menu, new LinearLayout.LayoutParams(dp(44), dp(44)));
-        menu.setOnClickListener(v -> new AlertDialog.Builder(this)
-                .setTitle("المزيد")
-                .setItems(new String[]{"جلسات Terminal", "مركز الأدوات", "إعدادات الذكاء الاصطناعي", "إعداد وربط Termux"},
-                        (dialog, which) -> {
-                            if (which == 0) startActivity(new Intent(this, TerminalSessionsActivity.class));
-                            else if (which == 1) startActivity(new Intent(this, ToolsActivity.class));
-                            else if (which == 2) startActivity(new Intent(this, AiSettingsActivity.class));
-                            else showHelpDialog(false);
-                        }).show());
-        root.addView(header);
+        pill = new Ui.StatusPill(this, theme);
+        pill.set(false, "Termux");
+        ImageView help = Ui.iconButton(this, theme, Icons.INFO, false);
+        help.setContentDescription("إعداد الربط");
+        help.setOnClickListener(v -> showHelpDialog(false));
+        root.addView(Ui.header(this, theme, "TFM", "مساحة عمل Termux", false, pill, help));
 
-        LinearLayout agentCard = new LinearLayout(this);
-        agentCard.setOrientation(LinearLayout.HORIZONTAL);
-        agentCard.setGravity(Gravity.CENTER_VERTICAL);
-        agentCard.setPadding(dp(14), dp(12), dp(12), dp(12));
-        agentCard.setBackground(round(PANEL_2, 16, ACCENT));
-        LinearLayout agentInfo = new LinearLayout(this);
-        agentInfo.setOrientation(LinearLayout.VERTICAL);
-        agentInfo.addView(text("AI Agent", 17, TEXT, true));
-        TextView agentDescription = text("يفحص المخرجات وينفّذ أدوات داخل Termux بعد موافقتك", 11, MUTED, false);
-        LinearLayout.LayoutParams sub = new LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT);
-        sub.topMargin = dp(3);
-        agentInfo.addView(agentDescription, sub);
-        agentCard.addView(agentInfo, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        Button openAgent = button("فتح الوكيل  ›", ACCENT, BG);
-        openAgent.setOnClickListener(v -> {
-            startActivity(new Intent(this, AiAssistantActivity.class));
-            overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out);
-        });
-        agentCard.addView(openAgent, new LinearLayout.LayoutParams(dp(108), dp(42)));
-        LinearLayout.LayoutParams agentLp = new LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT);
-        agentLp.topMargin = dp(10);
-        agentLp.bottomMargin = dp(10);
-        root.addView(agentCard, agentLp);
+        connectionLabel = text("", 11, MUTED, false);
 
-        connectionLabel = text("جارِ فحص اتصال Termux…", 11, MUTED, false);
-        connectionLabel.setPadding(dp(2), 0, 0, dp(7));
-        root.addView(connectionLabel);
-
-        pathBar = new LinearLayout(this);
-        pathBar.setGravity(Gravity.CENTER_VERTICAL);
-        pathInput = new EditText(this);
-        pathInput.setSingleLine(true);
-        pathInput.setTextColor(TEXT);
-        pathInput.setHintTextColor(MUTED);
-        pathInput.setTextSize(13);
-        pathInput.setHint("المسار الحالي أو ~/...");
-        pathInput.setPadding(dp(12), 0, dp(12), 0);
-        pathInput.setBackground(round(PANEL, 12, DIVIDER));
-        pathBar.addView(pathInput, new LinearLayout.LayoutParams(0, dp(46), 1));
-        Button go = button("فتح", PANEL_2, ACCENT);
-        go.setOnClickListener(v -> {
-            String path = pathInput.getText().toString().trim();
-            if (!path.isEmpty()) loadDirectory(path, false);
-        });
-        LinearLayout.LayoutParams goLp = new LinearLayout.LayoutParams(dp(58), dp(42));
-        goLp.leftMargin = dp(6);
-        pathBar.addView(go, goLp);
-        Button up = button("↑", PANEL, TEXT);
-        up.setTextSize(20);
+        // path card: up button + breadcrumbs + edit toggle
+        LinearLayout pathCard = new LinearLayout(this);
+        pathCard.setOrientation(LinearLayout.HORIZONTAL);
+        pathCard.setGravity(Gravity.CENTER_VERTICAL);
+        pathCard.setPadding(dp(6), dp(6), dp(6), dp(6));
+        pathCard.setBackground(Ui.surface(this, theme, theme.panel, 16, 0));
+        ImageView up = Ui.iconButton(this, theme, Icons.UP, false);
+        up.setContentDescription("مجلد أعلى");
         up.setOnClickListener(v -> {
             String parent = new java.io.File(currentPath).getParent();
             if (parent != null) loadDirectory(parent, false);
         });
-        LinearLayout.LayoutParams upLp = new LinearLayout.LayoutParams(dp(42), dp(42));
-        upLp.leftMargin = dp(5);
-        pathBar.addView(up, upLp);
-        root.addView(pathBar);
+        pathCard.addView(up, new LinearLayout.LayoutParams(dp(40), dp(40)));
+        crumbScroll = new HorizontalScrollView(this);
+        crumbScroll.setHorizontalScrollBarEnabled(false);
+        crumbScroll.setLayoutDirection(View.LAYOUT_DIRECTION_LTR);
+        crumbs = new LinearLayout(this);
+        crumbs.setOrientation(LinearLayout.HORIZONTAL);
+        crumbs.setGravity(Gravity.CENTER_VERTICAL);
+        crumbs.setLayoutDirection(View.LAYOUT_DIRECTION_LTR);
+        crumbScroll.addView(crumbs, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        LinearLayout.LayoutParams csLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        csLp.setMarginStart(dp(8));
+        csLp.setMarginEnd(dp(8));
+        pathCard.addView(crumbScroll, csLp);
+        ImageView edit = Ui.iconButton(this, theme, Icons.EDIT, false);
+        edit.setContentDescription("تعديل المسار");
+        pathCard.addView(edit, new LinearLayout.LayoutParams(dp(40), dp(40)));
+        LinearLayout.LayoutParams pcLp = new LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT);
+        pcLp.topMargin = dp(10);
+        root.addView(pathCard, pcLp);
+        Ui.enter(pathCard, 1);
 
-        LinearLayout quick = new LinearLayout(this);
-        quick.setOrientation(LinearLayout.HORIZONTAL);
-        quick.setGravity(Gravity.CENTER_VERTICAL);
-        quick.addView(buttonSmall("HOME", () -> loadDirectory(TERMUX_HOME, false)), weightLp());
-        quick.addView(buttonSmall("PREFIX", () -> loadDirectory(TERMUX_PREFIX, false)), weightLp());
-        quick.addView(buttonSmall("التخزين", () -> loadDirectory("/storage/emulated/0", false)), weightLp());
-        root.addView(quick);
+        // editable path row (hidden until the pen is tapped)
+        pathBar = new LinearLayout(this);
+        pathBar.setGravity(Gravity.CENTER_VERTICAL);
+        pathBar.setVisibility(View.GONE);
+        pathInput = new EditText(this);
+        pathInput.setSingleLine(true);
+        pathInput.setTextSize(13);
+        pathInput.setHint("المسار الحالي أو ~/...");
+        pathInput.setPadding(dp(14), 0, dp(14), 0);
+        Ui.styleField(this, theme, pathInput);
+        pathInput.setLayoutDirection(View.LAYOUT_DIRECTION_LTR);
+        pathBar.addView(pathInput, new LinearLayout.LayoutParams(0, dp(46), 1));
+        Button go = button("فتح", ACCENT, BG);
+        go.setOnClickListener(v -> {
+            String path = pathInput.getText().toString().trim();
+            if (!path.isEmpty()) { loadDirectory(path, false); Ui.reveal(pathBar, false); }
+        });
+        LinearLayout.LayoutParams goLp = new LinearLayout.LayoutParams(dp(66), dp(44));
+        goLp.setMarginStart(dp(8));
+        pathBar.addView(go, goLp);
+        LinearLayout.LayoutParams pbLp = new LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT);
+        pbLp.topMargin = dp(8);
+        root.addView(pathBar, pbLp);
+        edit.setOnClickListener(v -> Ui.reveal(pathBar, pathBar.getVisibility() != View.VISIBLE));
 
-        LinearLayout actions = new LinearLayout(this);
-        actions.setOrientation(LinearLayout.HORIZONTAL);
-        actions.setGravity(Gravity.CENTER_VERTICAL);
-        Button search = button("بحث", PANEL, TEXT);
-        search.setOnClickListener(v -> showSearchDialog());
-        actions.addView(search, new LinearLayout.LayoutParams(0, dp(42), 1));
-        hiddenButton = button(showHidden ? "المخفية ظاهرة" : "المخفية مخفية", PANEL, ACCENT);
+        // quick-action chips
+        HorizontalScrollView chipScroll = new HorizontalScrollView(this);
+        chipScroll.setHorizontalScrollBarEnabled(false);
+        LinearLayout chips = new LinearLayout(this);
+        chips.setOrientation(LinearLayout.HORIZONTAL);
+        chips.setGravity(Gravity.CENTER_VERTICAL);
+        chipScroll.addView(chips);
+        addChip(chips, "Home", Icons.HOME, () -> loadDirectory(TERMUX_HOME, false));
+        addChip(chips, "Prefix", Icons.BOX, () -> loadDirectory(TERMUX_PREFIX, false));
+        addChip(chips, "التخزين", Icons.PHONE, () -> loadDirectory("/storage/emulated/0", false));
+        addChip(chips, "بحث", Icons.SEARCH, () -> showSearchDialog());
+        hiddenButton = Ui.chip(this, theme, showHidden ? "المخفية ظاهرة" : "المخفية مخفية", showHidden ? Icons.EYE : Icons.EYE_OFF, showHidden);
         hiddenButton.setOnClickListener(v -> {
             showHidden = !showHidden;
             hiddenButton.setText(showHidden ? "المخفية ظاهرة" : "المخفية مخفية");
+            Ui.applyChip(this, theme, hiddenButton, showHidden ? Icons.EYE : Icons.EYE_OFF, showHidden);
             loadDirectory(currentPath, false);
         });
-        LinearLayout.LayoutParams hiddenLp = new LinearLayout.LayoutParams(0, dp(42), 1.35f);
-        hiddenLp.setMargins(dp(6), 0, dp(6), 0);
-        actions.addView(hiddenButton, hiddenLp);
-        Button refresh = button("تحديث", PANEL, TEXT);
-        refresh.setOnClickListener(v -> loadDirectory(currentPath, false));
-        actions.addView(refresh, new LinearLayout.LayoutParams(0, dp(42), 1));
-        Button create = button("+", PANEL_2, ACCENT);
-        create.setTextSize(23);
-        create.setOnClickListener(v -> showCreateMenu());
-        LinearLayout.LayoutParams createLp = new LinearLayout.LayoutParams(dp(44), dp(42));
-        createLp.leftMargin = dp(6);
-        actions.addView(create, createLp);
-        LinearLayout.LayoutParams actionsLp = new LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT);
-        actionsLp.topMargin = dp(8);
-        root.addView(actions, actionsLp);
+        LinearLayout.LayoutParams hLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        hLp.setMarginEnd(dp(8));
+        chips.addView(hiddenButton, hLp);
+        addChip(chips, "تحديث", Icons.REFRESH, () -> loadDirectory(currentPath, false));
+        LinearLayout.LayoutParams chipsLp = new LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT);
+        chipsLp.topMargin = dp(10);
+        root.addView(chipScroll, chipsLp);
+        Ui.enter(chipScroll, 2);
 
-        TextView filesHeading = text("الملفات والمجلدات", 14, TEXT, true);
-        filesHeading.setPadding(dp(3), dp(10), 0, dp(5));
-        root.addView(filesHeading);
-
+        // list + skeleton + empty state
+        FrameLayout listHost = new FrameLayout(this);
         listView = new ListView(this);
-        listView.setDivider(new android.graphics.drawable.ColorDrawable(Color.rgb(34, 45, 69)));
-        listView.setDividerHeight(dp(1));
+        listView.setDivider(null);
+        listView.setDividerHeight(0);
         listView.setCacheColorHint(Color.TRANSPARENT);
-        listView.setBackgroundColor(BG);
+        listView.setBackgroundColor(Color.TRANSPARENT);
         listView.setSelector(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
+        listView.setClipToPadding(false);
+        listView.setPadding(0, dp(6), 0, dp(96));
+        listView.setVerticalScrollBarEnabled(false);
+        listView.setOverScrollMode(View.OVER_SCROLL_NEVER);
         adapter = new FileAdapter();
         listView.setAdapter(adapter);
         listView.setOnItemClickListener((parent, view, position, id) -> onFileClicked(files.get(position)));
@@ -540,26 +530,123 @@ except Exception as e:
             openFileActions(files.get(position));
             return true;
         });
-        root.addView(listView, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
+        listHost.addView(listView, new FrameLayout.LayoutParams(-1, -1));
 
+        LinearLayout sk = new LinearLayout(this);
+        sk.setOrientation(LinearLayout.VERTICAL);
+        sk.setPadding(0, dp(10), 0, 0);
+        for (int i = 0; i < 7; i++) {
+            View bar = new View(this);
+            bar.setBackground(Ui.shape(theme.glass, Ui.dpf(this, 20), 0, 0));
+            LinearLayout.LayoutParams bLp = new LinearLayout.LayoutParams(-1, dp(62));
+            bLp.bottomMargin = dp(8);
+            sk.addView(bar, bLp);
+            Ui.pulse(bar, 1f, 700 + i * 90);
+        }
+        sk.setVisibility(View.GONE);
+        skeleton = sk;
+        listHost.addView(sk, new FrameLayout.LayoutParams(-1, -2));
+
+        LinearLayout empty = new LinearLayout(this);
+        empty.setOrientation(LinearLayout.VERTICAL);
+        empty.setGravity(Gravity.CENTER);
+        ImageView emptyIcon = Icons.view(this, Icons.FOLDER, Ui.alpha(theme.muted, 150), 64);
+        empty.addView(emptyIcon);
+        TextView emptyText = text("المجلد فاضي", 14, MUTED, false);
+        emptyText.setGravity(Gravity.CENTER);
+        emptyText.setPadding(0, dp(10), 0, 0);
+        empty.addView(emptyText);
+        empty.setVisibility(View.GONE);
+        emptyView = empty;
+        listHost.addView(empty, new FrameLayout.LayoutParams(-1, -1));
+        LinearLayout.LayoutParams lhLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1);
+        lhLp.topMargin = dp(4);
+        root.addView(listHost, lhLp);
+
+        // status row
         LinearLayout bottom = new LinearLayout(this);
         bottom.setGravity(Gravity.CENTER_VERTICAL);
         statusLabel = text("جاهز", 11, MUTED, false);
-        bottom.addView(statusLabel, new LinearLayout.LayoutParams(0, dp(38), 1));
-        moreButton = button("تحميل المزيد", PANEL_2, ACCENT);
+        statusLabel.setPadding(dp(4), dp(4), dp(4), dp(2));
+        bottom.addView(statusLabel, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        moreButton = Ui.button(this, theme, "تحميل المزيد", theme.panel2, theme.accent);
         moreButton.setVisibility(View.GONE);
         moreButton.setOnClickListener(v -> loadMore());
-        bottom.addView(moreButton, new LinearLayout.LayoutParams(dp(112), dp(36)));
+        bottom.addView(moreButton, new LinearLayout.LayoutParams(dp(120), dp(36)));
         root.addView(bottom);
+
+        root.addView(Ui.dock(this, theme, 0));
+
+        ImageView fab = Ui.iconButton(this, theme, Icons.PLUS, true);
+        fab.setElevation(dp(8));
+        fab.setContentDescription("إنشاء ملف أو مجلد");
+        int fp = dp(15);
+        fab.setPadding(fp, fp, fp, fp);
+        fab.setOnClickListener(v -> { v.animate().rotationBy(90f).setDuration(280).start(); showCreateMenu(); });
+        FrameLayout.LayoutParams fLp = new FrameLayout.LayoutParams(dp(58), dp(58), Gravity.BOTTOM | Gravity.END);
+        fLp.bottomMargin = dp(100);
+        fLp.setMarginEnd(dp(22));
+        screen.addView(fab, fLp);
+        Ui.hideOnKeyboard(this, fab);
+        Ui.enter(fab, 6);
         updatePathView();
+    }
+
+    private TextView addChip(LinearLayout row, String label, int icon, Runnable action) {
+        TextView c = Ui.chip(this, theme, label, icon, false);
+        c.setOnClickListener(v -> { if (action != null) action.run(); });
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.setMarginEnd(dp(8));
+        row.addView(c, lp);
+        return c;
+    }
+
+    private void rebuildCrumbs() {
+        if (crumbs == null) return;
+        crumbs.removeAllViews();
+        String p = searchMode ? searchRoot : currentPath;
+        if (p == null || p.isEmpty()) p = "/";
+        ArrayList<String[]> parts = new ArrayList<>();
+        String base;
+        String rest;
+        if (p.equals(TERMUX_HOME) || p.startsWith(TERMUX_HOME + "/")) { parts.add(new String[]{"~", TERMUX_HOME}); base = TERMUX_HOME; rest = p.substring(TERMUX_HOME.length()); }
+        else if (p.equals(TERMUX_PREFIX) || p.startsWith(TERMUX_PREFIX + "/")) { parts.add(new String[]{"$PREFIX", TERMUX_PREFIX}); base = TERMUX_PREFIX; rest = p.substring(TERMUX_PREFIX.length()); }
+        else { parts.add(new String[]{"/", "/"}); base = ""; rest = p; }
+        for (String seg : rest.split("/")) {
+            if (seg.isEmpty()) continue;
+            base = base + "/" + seg;
+            parts.add(new String[]{seg, base});
+        }
+        for (int i = 0; i < parts.size(); i++) {
+            final String target = parts.get(i)[1];
+            boolean last = i == parts.size() - 1;
+            if (i > 0) {
+                ImageView sep = Icons.view(this, Icons.CHEVRON, Ui.alpha(theme.muted, 170), 14);
+                crumbs.addView(sep);
+            }
+            TextView c = Ui.chip(this, theme, parts.get(i)[0], 0, last);
+            c.setPadding(dp(12), dp(7), dp(12), dp(7));
+            c.setOnClickListener(v -> loadDirectory(target, false));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.setMarginStart(i > 0 ? dp(2) : 0);
+            lp.setMarginEnd(dp(2));
+            crumbs.addView(c, lp);
+        }
+        crumbScroll.post(() -> crumbScroll.fullScroll(View.FOCUS_RIGHT));
+    }
+
+    private void setLoading(boolean loading) {
+        if (skeleton == null || emptyView == null) return;
+        skeleton.setVisibility(loading && files.isEmpty() ? View.VISIBLE : View.GONE);
+        boolean empty = !loading && files.isEmpty() && connected;
+        emptyView.setVisibility(empty ? View.VISIBLE : View.GONE);
+        if (empty) Ui.enter(emptyView, 0);
     }
 
     private void updatePathView() {
         if (pathInput != null && !searchMode) pathInput.setText(currentPath);
-        if (connectionLabel != null) {
-            connectionLabel.setText(connected ? "● متصل بـ Termux  •  " + (searchMode ? "نتائج البحث" : currentPath) : "○ غير متصل بـ Termux");
-            connectionLabel.setTextColor(connected ? ACCENT : MUTED);
-        }
+        if (pill != null) pill.set(connected, connected ? (searchMode ? "نتائج البحث" : "Termux متصل") : "غير متصل");
+        rebuildCrumbs();
     }
 
     private boolean ensureReady() {
@@ -674,8 +761,8 @@ except Exception as e:
             moreAvailable = response.optBoolean("more", false);
             adapter.notifyDataSetChanged();
             animateListIn();
-            connectionLabel.setText("نتائج البحث داخل: " + rootPath);
-            connectionLabel.setTextColor(ACCENT);
+            if (pill != null) pill.set(true, "نتائج البحث");
+            rebuildCrumbs();
             setStatus("نتائج: " + files.size() + (moreAvailable ? " • أكو نتائج أكثر من الحد المعروض" : ""), MUTED);
         });
     }
@@ -741,9 +828,22 @@ except Exception as e:
         choices.add("حذف نهائي"); actions.add("delete");
         String[] labels = choices.toArray(new String[0]);
         String[] ops = actions.toArray(new String[0]);
-        new AlertDialog.Builder(this)
-                .setTitle(file.optString("name", path))
-                .setItems(labels, (dialog, which) -> {
+        int[] icons = new int[ops.length];
+        int dangerIdx = -1;
+        for (int i = 0; i < ops.length; i++) {
+            switch (ops[i]) {
+                case "edit": icons[i] = Icons.EDIT; break;
+                case "stat": icons[i] = Icons.INFO; break;
+                case "terminal_edit": icons[i] = Icons.TERMINAL; break;
+                case "copy": icons[i] = Icons.COPY; break;
+                case "move": icons[i] = Icons.FOLDER; break;
+                case "rename": icons[i] = Icons.EDIT; break;
+                case "chmod": icons[i] = Icons.KEY; break;
+                case "run": icons[i] = Icons.PLAY; break;
+                default: icons[i] = Icons.TRASH; dangerIdx = i; break;
+            }
+        }
+        Ui.actionSheet(this, file.optString("name", path), path, labels, icons, dangerIdx, which -> {
                     switch (ops[which]) {
                         case "edit": openTextFile(path); break;
                         case "stat": showInfo(path); break;
@@ -755,9 +855,7 @@ except Exception as e:
                         case "run": runFileInTermux(path); break;
                         case "delete": confirmDelete(file); break;
                     }
-                })
-                .setNegativeButton("إلغاء", null)
-                .show();
+                });
     }
 
     private void openTextFile(String path) {
@@ -770,7 +868,7 @@ except Exception as e:
                 return;
             }
             if (response.optBoolean("binary", false)) {
-                new AlertDialog.Builder(this).setTitle("ملف ثنائي")
+                new Ui.Sheet(this).setTitle("ملف ثنائي")
                         .setMessage("هذا الملف يبدو ثنائيًا وما ينفتح كمحرر نصوص.\nالحجم: " + humanSize(response.optLong("size", 0)) + "\n\nتقدر تستخدم تشغيل الملف أو فتحه داخل Termux حسب نوعه.")
                         .setPositiveButton("حسنًا", null).show();
                 return;
@@ -800,9 +898,10 @@ except Exception as e:
         editor.setText(originalText);
         editor.setSelection(editor.length());
         editor.setPadding(dp(10), dp(10), dp(10), dp(10));
-        editor.setBackground(round(PANEL, 9, Color.rgb(53, 68, 94)));
+        Ui.styleField(this, th(), editor);
+        editor.setPadding(dp(12), dp(12), dp(12), dp(12));
         box.addView(editor, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(330)));
-        AlertDialog dialog = new AlertDialog.Builder(this)
+        AlertDialog dialog = new Ui.Sheet(this)
                 .setTitle("محرر النصوص")
                 .setView(box)
                 .setPositiveButton("حفظ", null)
@@ -817,7 +916,7 @@ except Exception as e:
                 dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(true);
                 if (error != null) showBridgeError(error);
                 else {
-                    Toast.makeText(this, response.optString("message", "انحفظ الملف"), Toast.LENGTH_SHORT).show();
+                    Ui.toast(this, response.optString("message", "انحفظ الملف"));
                     dialog.dismiss();
                     if (!searchMode) loadDirectory(currentPath, false);
                 }
@@ -843,7 +942,7 @@ except Exception as e:
             msg.append("قراءة: ").append(item.optBoolean("readable") ? "نعم" : "لا").append("  كتابة: ").append(item.optBoolean("writable") ? "نعم" : "لا").append("  تنفيذ: ").append(item.optBoolean("executable") ? "نعم" : "لا").append("\n");
             if (!item.optString("linkTarget", "").isEmpty()) msg.append("الهدف: ").append(item.optString("linkTarget")).append("\n");
             msg.append("آخر تعديل: ").append(new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(new java.util.Date(item.optLong("mtime", 0) * 1000L)));
-            new AlertDialog.Builder(this).setTitle(item.optString("name", "معلومات الملف"))
+            new Ui.Sheet(this).setTitle(item.optString("name", "معلومات الملف"))
                     .setMessage(msg.toString()).setPositiveButton("إغلاق", null).show();
         });
     }
@@ -855,7 +954,7 @@ except Exception as e:
         input.setTextColor(TEXT);
         input.setHintTextColor(MUTED);
         input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
-        new AlertDialog.Builder(this).setTitle(move ? "نقل العنصر" : "نسخ العنصر")
+        new Ui.Sheet(this).setTitle(move ? "نقل العنصر" : "نسخ العنصر")
                 .setMessage("اكتب مسار المجلد الوجهة. اسم العنصر راح يبقى نفسه.")
                 .setView(input)
                 .setPositiveButton(move ? "نقل" : "نسخ", (dialog, which) -> {
@@ -864,7 +963,7 @@ except Exception as e:
                     runBridge(move ? "move" : "copy", payload, (response, error) -> {
                         if (error != null) showBridgeError(error);
                         else {
-                            Toast.makeText(this, response.optString("message", "اكتملت العملية"), Toast.LENGTH_SHORT).show();
+                            Ui.toast(this, response.optString("message", "اكتملت العملية"));
                             loadDirectory(currentPath, false);
                         }
                     });
@@ -876,14 +975,16 @@ except Exception as e:
         input.setSingleLine(true);
         input.setText(file.optString("name", ""));
         input.setTextColor(TEXT);
-        new AlertDialog.Builder(this).setTitle("إعادة تسمية")
+        Ui.styleField(this, th(), input);
+        input.setPadding(dp(14), dp(10), dp(14), dp(10));
+        new Ui.Sheet(this).setTitle("إعادة تسمية")
                 .setView(input)
                 .setPositiveButton("حفظ", (dialog, which) -> {
                     JSONObject payload = new JSONObject();
                     try { payload.put("path", file.optString("path")); payload.put("name", input.getText().toString().trim()); } catch (JSONException ignored) { }
                     runBridge("rename", payload, (response, error) -> {
                         if (error != null) showBridgeError(error);
-                        else { Toast.makeText(this, "تغير الاسم", Toast.LENGTH_SHORT).show(); loadDirectory(currentPath, false); }
+                        else { Ui.toast(this, "تغير الاسم"); loadDirectory(currentPath, false); }
                     });
                 }).setNegativeButton("إلغاء", null).show();
     }
@@ -918,7 +1019,7 @@ except Exception as e:
         TextView warning = text("هذا يغيّر rwx فقط؛ الروابط الرمزية وبعض الملفات الخاصة قد ترفض chmod.", 10, MUTED, false);
         warning.setPadding(dp(4), dp(7), dp(4), 0);
         content.addView(warning);
-        new AlertDialog.Builder(this).setTitle("صلاحيات الملف")
+        new Ui.Sheet(this).setTitle("صلاحيات الملف")
                 .setView(content)
                 .setPositiveButton("تطبيق", (dialog, which) -> {
                     int newMode = 0;
@@ -927,7 +1028,7 @@ except Exception as e:
                     try { payload.put("path", file.optString("path")); payload.put("mode", String.format(java.util.Locale.ROOT, "%03o", newMode)); } catch (JSONException ignored) { }
                     runBridge("chmod", payload, (response, error) -> {
                         if (error != null) showBridgeError(error);
-                        else { Toast.makeText(this, "الصلاحيات الجديدة: " + response.optString("mode", ""), Toast.LENGTH_SHORT).show(); loadDirectory(currentPath, false); }
+                        else { Ui.toast(this, "الصلاحيات الجديدة: " + response.optString("mode", "")); loadDirectory(currentPath, false); }
                     });
                 }).setNegativeButton("إلغاء", null).show();
     }
@@ -935,22 +1036,21 @@ except Exception as e:
     private void confirmDelete(JSONObject file) {
         String path = file.optString("path");
         boolean dir = file.optBoolean("isDir", false);
-        new AlertDialog.Builder(this).setTitle("تأكيد الحذف")
+        new Ui.Sheet(this).setTitle("تأكيد الحذف")
                 .setMessage("راح ينحذف " + (dir ? "المجلد وكل محتوياته" : "الملف") + " نهائيًا:\n\n" + path + "\n\nماكو سلة محذوفات داخل Termux.")
                 .setPositiveButton("حذف نهائي", (dialog, which) -> {
                     JSONObject payload = new JSONObject();
                     try { payload.put("path", path); } catch (JSONException ignored) { }
                     runBridge("delete", payload, (response, error) -> {
                         if (error != null) showBridgeError(error);
-                        else { Toast.makeText(this, "انحذف العنصر", Toast.LENGTH_SHORT).show(); loadDirectory(currentPath, false); }
+                        else { Ui.toast(this, "انحذف العنصر"); loadDirectory(currentPath, false); }
                     });
                 }).setNegativeButton("إلغاء", null).show();
     }
 
     private void showCreateMenu() {
-        new AlertDialog.Builder(this).setTitle("إنشاء عنصر جديد")
-                .setItems(new String[]{"مجلد جديد", "ملف فارغ جديد"}, (dialog, which) -> showCreateDialog(which == 0))
-                .setNegativeButton("إلغاء", null).show();
+        Ui.actionSheet(this, "إنشاء عنصر جديد", currentPath, new String[]{"مجلد جديد", "ملف فارغ جديد"},
+                new int[]{Icons.FOLDER, Icons.FILE}, -1, which -> showCreateDialog(which == 0));
     }
 
     private void showCreateDialog(boolean folder) {
@@ -958,7 +1058,9 @@ except Exception as e:
         input.setSingleLine(true);
         input.setHint(folder ? "اسم المجلد" : "اسم الملف، مثل script.py");
         input.setTextColor(TEXT);
-        new AlertDialog.Builder(this).setTitle(folder ? "مجلد جديد" : "ملف جديد")
+        Ui.styleField(this, th(), input);
+        input.setPadding(dp(14), dp(10), dp(14), dp(10));
+        new Ui.Sheet(this).setTitle(folder ? "مجلد جديد" : "ملف جديد")
                 .setMessage("المكان: " + currentPath)
                 .setView(input)
                 .setPositiveButton("إنشاء", (dialog, which) -> {
@@ -968,7 +1070,7 @@ except Exception as e:
                     try { payload.put("path", currentPath + "/" + name); } catch (JSONException ignored) { }
                     runBridge(folder ? "mkdir" : "create", payload, (response, error) -> {
                         if (error != null) showBridgeError(error);
-                        else { Toast.makeText(this, response.optString("message", "تم الإنشاء"), Toast.LENGTH_SHORT).show(); loadDirectory(currentPath, false); }
+                        else { Ui.toast(this, response.optString("message", "تم الإنشاء")); loadDirectory(currentPath, false); }
                     });
                 }).setNegativeButton("إلغاء", null).show();
     }
@@ -978,7 +1080,9 @@ except Exception as e:
         input.setSingleLine(true);
         input.setHint("جزء من اسم الملف أو المجلد");
         input.setTextColor(TEXT);
-        new AlertDialog.Builder(this).setTitle("بحث داخل المجلد الحالي")
+        Ui.styleField(this, th(), input);
+        input.setPadding(dp(14), dp(10), dp(14), dp(10));
+        new Ui.Sheet(this).setTitle("بحث داخل المجلد الحالي")
                 .setMessage("البحث يبدأ من: " + currentPath)
                 .setView(input)
                 .setPositiveButton("بحث", (dialog, which) -> {
@@ -1040,12 +1144,12 @@ except Exception as e:
                 break;
             }
             case "html": case "htm": case "pdf": case "png": case "jpg": case "jpeg": case "webp":
-                new AlertDialog.Builder(this).setTitle("فتح الملف")
+                new Ui.Sheet(this).setTitle("فتح الملف")
                         .setMessage("هذا النوع يُفتح كتطبيق/مستند، مو كأمر Shell. تقدر تفتح الملف بتطبيق أندرويد أو تستخدم أمرًا مخصصًا من مركز الأدوات.\n\n" + path)
                         .setPositiveButton("نسخ المسار", (d, w) -> {
                             ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
                             cm.setPrimaryClip(ClipData.newPlainText("path", path));
-                            Toast.makeText(this, "تم نسخ المسار", Toast.LENGTH_SHORT).show();
+                            Ui.toast(this, "تم نسخ المسار");
                         }).setNegativeButton("إلغاء", null).show();
                 return;
             default:
@@ -1053,7 +1157,7 @@ except Exception as e:
                 return;
         }
         String fullCommand = "cd " + shellQuote(parentOf(path)) + " && " + command;
-        new AlertDialog.Builder(this).setTitle("تشغيل الملف")
+        new Ui.Sheet(this).setTitle("تشغيل الملف")
                 .setMessage("المشغّل المقترح: " + command + "\n\nراح ينفتح Termux وينفّذ الأمر ضمن مجلد الملف. لازم تكون اللغة أو المترجم مثبتًا داخل Termux. شغّل بس ملفات تثق بيها.\n\n" + path)
                 .setPositiveButton("تشغيل", (dialog, which) -> launchTerminalCommand(fullCommand, parentOf(path), "تشغيل " + fileName))
                 .setNeutralButton("أمر مخصص…", (dialog, which) -> showCustomRunDialog(path))
@@ -1072,7 +1176,7 @@ except Exception as e:
         input.setSelection(input.length());
         input.setPadding(dp(10), dp(8), dp(10), dp(8));
         input.setBackground(round(PANEL, 9, Color.rgb(53, 68, 94)));
-        new AlertDialog.Builder(this).setTitle("أمر تشغيل مخصص")
+        new Ui.Sheet(this).setTitle("أمر تشغيل مخصص")
                 .setMessage("اكتب أمر أي لغة أو أداة مثبتة في Termux. المسار الحالي هو مجلد الملف. مثال: python 'script.py' أو node 'app.js' أو clang 'main.c' -o main && ./main")
                 .setView(input)
                 .setPositiveButton("تشغيل في Termux", (d, w) -> {
@@ -1101,37 +1205,25 @@ except Exception as e:
     }
 
     // Small programmatic UI helpers shared by the redesigned file-manager screen.
-    private int dp(float value) {
-        return (int) (value * getResources().getDisplayMetrics().density + 0.5f);
+    private UiTheme th() {
+        if (theme == null) theme = UiTheme.get(this);
+        return theme;
     }
 
-    private GradientDrawable round(int color, int radiusDp, int strokeColor) {
-        GradientDrawable drawable = new GradientDrawable();
-        drawable.setColor(color);
-        drawable.setCornerRadius(dp(radiusDp));
-        if (strokeColor != Color.TRANSPARENT) drawable.setStroke(dp(1), strokeColor);
-        return drawable;
+    private int dp(float value) {
+        return Ui.dp(this, value);
+    }
+
+    private android.graphics.drawable.Drawable round(int color, int radiusDp, int strokeColor) {
+        return Ui.surface(this, th(), color, radiusDp, strokeColor);
     }
 
     private Button button(String label, int background, int color) {
-        Button view = new Button(this);
-        view.setText(label);
-        view.setTextColor(color);
-        view.setTextSize(13);
-        view.setAllCaps(false);
-        view.setMinHeight(0);
-        view.setMinimumHeight(0);
-        view.setPadding(dp(9), dp(5), dp(9), dp(5));
-        view.setBackground(round(background, 11, Color.TRANSPARENT));
-        return view;
+        return Ui.button(this, th(), label, background, color);
     }
 
     private TextView text(String value, int size, int color, boolean bold) {
-        TextView view = new TextView(this);
-        view.setText(value);
-        view.setTextSize(size);
-        view.setTextColor(color);
-        if (bold) view.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        TextView view = Ui.text(this, value, size, color, bold);
         view.setGravity(Gravity.CENTER_VERTICAL);
         return view;
     }
@@ -1171,17 +1263,18 @@ except Exception as e:
 
     private void animateListOut() {
         if (listView == null) return;
+        animatedUpTo = -1;
+        listGen++;
         listView.animate().cancel();
-        listView.animate().alpha(0.72f).translationY(dp(4)).setDuration(75).start();
+        listView.animate().alpha(0.35f).setDuration(90).start();
+        setLoading(true);
     }
 
     private void animateListIn() {
         if (listView == null) return;
         listView.animate().cancel();
-        listView.setAlpha(0.72f);
-        listView.setTranslationY(dp(4));
-        listView.animate().alpha(1f).translationY(0f).setDuration(165)
-                .setInterpolator(new DecelerateInterpolator()).start();
+        listView.animate().alpha(1f).setDuration(200).setInterpolator(new DecelerateInterpolator()).start();
+        setLoading(false);
     }
 
     private String parentOf(String path) {
@@ -1190,7 +1283,7 @@ except Exception as e:
     }
 
     private void showPermissionDialog() {
-        new AlertDialog.Builder(this).setTitle("إكمال ربط Termux")
+        new Ui.Sheet(this).setTitle("إكمال ربط Termux")
                 .setMessage("التطبيق يحتاج إذن Run commands in Termux environment حتى يقرأ ويعدّل الملفات عن طريق Termux نفسه.\n\nمن إعدادات التطبيق افتح Permissions / Additional permissions وفعّل Run commands in Termux environment. ومن داخل Termux فعّل allow-external-apps=true، بعدها أعد تشغيل Termux.")
                 .setPositiveButton("فتح إعدادات التطبيق", (d, w) -> openAppSettings())
                 .setNeutralButton("طريقة الربط", (d, w) -> showHelpDialog(false))
@@ -1217,7 +1310,7 @@ except Exception as e:
         ScrollView scroll = new ScrollView(this);
         scroll.addView(text);
         box.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(300)));
-        AlertDialog dialog = new AlertDialog.Builder(this).setTitle(termuxMissing ? "Termux غير مثبت" : "إعداد الربط")
+        AlertDialog dialog = new Ui.Sheet(this).setTitle(termuxMissing ? "Termux غير مثبت" : "إعداد الربط")
                 .setView(box)
                 .setPositiveButton(termuxMissing ? "إغلاق" : "نسخ أمر الإعداد", null)
                 .setNeutralButton("إعدادات التطبيق", null)
@@ -1228,7 +1321,7 @@ except Exception as e:
                 String setup = "mkdir -p ~/.termux; touch ~/.termux/termux.properties; if grep -q '^allow-external-apps=' ~/.termux/termux.properties; then sed -i 's/^allow-external-apps=.*/allow-external-apps=true/' ~/.termux/termux.properties; else echo 'allow-external-apps=true' >> ~/.termux/termux.properties; fi; pkg install -y python";
                 ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
                 clipboard.setPrimaryClip(ClipData.newPlainText("Termux File Manager setup", setup));
-                Toast.makeText(this, "انسخنا أمر الإعداد. افتح Termux والصقه ونفّذه.", Toast.LENGTH_LONG).show();
+                Ui.toast(this, "انسخنا أمر الإعداد. افتح Termux والصقه ونفّذه.");
                 Intent launch = getPackageManager().getLaunchIntentForPackage("com.termux");
                 if (launch != null) startActivity(launch);
                 dialog.dismiss();
@@ -1251,7 +1344,7 @@ except Exception as e:
         if (message == null || message.trim().isEmpty()) message = "حدث خطأ غير معروف.";
         String lower = message.toLowerCase(java.util.Locale.ROOT);
         boolean setupIssue = lower.contains("external") || lower.contains("permission") || lower.contains("run_command") || lower.contains("run commands") || lower.contains("not allowed");
-        AlertDialog.Builder builder = new AlertDialog.Builder(this)
+        AlertDialog.Builder builder = new Ui.Sheet(this)
                 .setTitle("تعذر تنفيذ العملية")
                 .setMessage(message)
                 .setPositiveButton("حسنًا", null);
@@ -1260,7 +1353,7 @@ except Exception as e:
     }
 
     private void showMessage(String message) {
-        new AlertDialog.Builder(this).setMessage(message).setPositiveButton("حسنًا", null).show();
+        new Ui.Sheet(this).setMessage(message).setPositiveButton("حسنًا", null).show();
     }
 
     private String humanSize(long bytes) {
@@ -1278,50 +1371,78 @@ except Exception as e:
         @Override
         public View getView(int position, View convertView, ViewGroup parent) {
             JSONObject item = files.get(position);
-            LinearLayout row;
-            if (convertView instanceof LinearLayout) row = (LinearLayout) convertView;
+            FrameLayout wrap;
+            if (convertView instanceof FrameLayout) wrap = (FrameLayout) convertView;
             else {
-                row = new LinearLayout(MainActivity.this);
-                row.setOrientation(LinearLayout.HORIZONTAL);
-                row.setGravity(Gravity.CENTER_VERTICAL);
-                row.setPadding(dp(8), dp(6), dp(4), dp(6));
-                TextView icon = text("", 22, ACCENT, true);
-                icon.setGravity(Gravity.CENTER);
-                row.addView(icon, new LinearLayout.LayoutParams(dp(42), dp(50)));
+                wrap = new FrameLayout(MainActivity.this);
+                wrap.setPadding(0, dp(4), 0, dp(4));
+                LinearLayout card = new LinearLayout(MainActivity.this);
+                card.setOrientation(LinearLayout.HORIZONTAL);
+                card.setGravity(Gravity.CENTER_VERTICAL);
+                card.setPadding(dp(10), dp(9), dp(12), dp(9));
+                float r = Ui.dpf(MainActivity.this, 18f);
+                card.setBackground(new android.graphics.drawable.RippleDrawable(
+                        android.content.res.ColorStateList.valueOf(Ui.alpha(th().accent, 60)),
+                        Ui.surface(MainActivity.this, th(), th().panel, 14, 0),
+                        Ui.shape(Color.WHITE, r, 0, 0)));
+                ImageView tile = new ImageView(MainActivity.this);
+                tile.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+                tile.setPadding(dp(10), dp(10), dp(10), dp(10));
+                card.addView(tile, new LinearLayout.LayoutParams(dp(46), dp(46)));
                 LinearLayout texts = new LinearLayout(MainActivity.this);
                 texts.setOrientation(LinearLayout.VERTICAL);
                 texts.setGravity(Gravity.CENTER_VERTICAL);
-                texts.setPadding(dp(8), 0, dp(4), 0);
-                TextView name = text("", 14, TEXT, true);
+                TextView name = text("", 15, TEXT, true);
                 name.setSingleLine(true);
                 name.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);
-                TextView meta = text("", 10, MUTED, false);
+                TextView meta = text("", 11, MUTED, false);
                 meta.setSingleLine(true);
-                texts.addView(name, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(25)));
-                texts.addView(meta, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(21)));
-                row.addView(texts, new LinearLayout.LayoutParams(0, dp(50), 1));
-                TextView arrow = text("⋮", 21, MUTED, true);
-                arrow.setGravity(Gravity.CENTER);
-                row.addView(arrow, new LinearLayout.LayoutParams(dp(26), dp(44)));
-                row.setTag(new TextView[]{icon, name, meta});
+                meta.setEllipsize(android.text.TextUtils.TruncateAt.END);
+                texts.addView(name, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+                LinearLayout.LayoutParams mLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                mLp.topMargin = dp(2);
+                texts.addView(meta, mLp);
+                LinearLayout.LayoutParams tLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1);
+                tLp.setMarginStart(dp(12));
+                tLp.setMarginEnd(dp(8));
+                card.addView(texts, tLp);
+                ImageView trail = new ImageView(MainActivity.this);
+                trail.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+                card.addView(trail, new LinearLayout.LayoutParams(dp(20), dp(20)));
+                wrap.addView(card, new FrameLayout.LayoutParams(-1, -2));
+                wrap.setTag(new View[]{tile, name, meta, trail});
             }
-            TextView[] fields = (TextView[]) row.getTag();
+            View[] f = (View[]) wrap.getTag();
+            String nm = item.optString("name", "(بدون اسم)");
             String kind = item.optString("kind", "file");
             boolean dir = item.optBoolean("isDir", false);
+            boolean link = item.optBoolean("isLink", false);
             boolean hidden = item.optBoolean("hidden", false);
-            fields[0].setText(dir ? "▰" : (item.optBoolean("isLink", false) ? "↗" : (hidden ? "·" : "▤")));
-            fields[0].setTextColor(dir ? ACCENT : (hidden ? MUTED : Color.rgb(164, 188, 255)));
-            fields[1].setText(item.optString("name", "(بدون اسم)") + (hidden ? "  ·" : ""));
+            int tint = Icons.tintForFile(th(), nm, dir);
+            ImageView tile = (ImageView) f[0];
+            tile.setImageDrawable(Icons.get(MainActivity.this, Icons.forFile(nm, dir, link), tint));
+            tile.setBackground(Ui.shape(Ui.alpha(tint, 38), Ui.dpf(MainActivity.this, 15f), 0, 0));
+            ((TextView) f[1]).setText(nm);
             StringBuilder meta = new StringBuilder();
             if (dir) meta.append("مجلد");
             else if ("symlink".equals(kind)) meta.append("رابط رمزي");
             else if ("unknown".equals(kind)) meta.append("غير قابل للقراءة");
             else meta.append(humanSize(item.optLong("size", 0)));
-            meta.append("   •   ").append(item.optString("mode", "????"));
-            if (searchMode) meta.append("   •   ").append(item.optString("path", ""));
-            fields[2].setText(meta.toString());
-            row.setBackgroundColor(position % 2 == 0 ? BG : Color.rgb(13, 20, 38));
-            return row;
+            meta.append("  •  ").append(item.optString("mode", "????"));
+            if (searchMode) meta.append("  •  ").append(item.optString("path", ""));
+            ((TextView) f[2]).setText(meta.toString());
+            ((ImageView) f[3]).setImageDrawable(Icons.get(MainActivity.this, dir ? Icons.CHEVRON : Icons.MORE, Ui.alpha(MUTED, 200)));
+            wrap.setAlpha(hidden ? 0.62f : 1f);
+            long key = (long) listGen * 100000L + position;
+            Object prev = wrap.getTag(R.id.tfm_pos);
+            if (prev == null || ((Long) prev) != key) {
+                if (position > animatedUpTo && position < 14) Ui.enter(wrap, position);
+                else Ui.settle(wrap);
+                if (hidden && !(position > animatedUpTo && position < 14)) wrap.setAlpha(0.62f);
+                wrap.setTag(R.id.tfm_pos, key);
+            }
+            animatedUpTo = Math.max(animatedUpTo, position);
+            return wrap;
         }
     }
 }

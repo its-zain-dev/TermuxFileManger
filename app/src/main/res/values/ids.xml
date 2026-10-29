@@ -1,3 +1,4 @@
 <resources>
     <item name="tfm_anim" type="id" />
+    <item name="tfm_pos" type="id" />
 </resources>

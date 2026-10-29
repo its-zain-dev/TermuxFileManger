@@ -36,6 +36,11 @@ android {
         }
     }
 
+    lint {
+        // targetSdk is intentionally kept at 32 for Termux RUN_COMMAND compatibility.
+        disable 'ExpiredTargetSdkVersion'
+    }
+
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17

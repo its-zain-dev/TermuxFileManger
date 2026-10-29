@@ -1,11 +1,47 @@
 <resources>
     <style name="AppTheme" parent="android:style/Theme.Material.NoActionBar">
-        <item name="android:fontFamily">sans</item>
-        <item name="android:colorAccent">#74E0C4</item>
+        <item name="android:fontFamily">sans-serif</item>
+        <item name="android:colorAccent">#62E6C8</item>
         <item name="android:windowLightStatusBar">false</item>
-        <item name="android:statusBarColor">#0B1020</item>
-        <item name="android:navigationBarColor">#0B1020</item>
-        <item name="android:windowBackground">#0B1020</item>
+        <item name="android:statusBarColor">#070B18</item>
+        <item name="android:navigationBarColor">#070B18</item>
+        <item name="android:windowBackground">#070B18</item>
         <item name="android:windowActionModeOverlay">true</item>
+        <item name="android:windowAnimationStyle">@style/TfmActivityAnim</item>
+    </style>
+
+    <!-- Activity transitions: soft fade + depth, replaces the default slide. -->
+    <style name="TfmActivityAnim" parent="@android:style/Animation.Activity">
+        <item name="android:activityOpenEnterAnimation">@anim/tfm_enter</item>
+        <item name="android:activityOpenExitAnimation">@anim/tfm_exit</item>
+        <item name="android:activityCloseEnterAnimation">@anim/tfm_pop_enter</item>
+        <item name="android:activityCloseExitAnimation">@anim/tfm_pop_exit</item>
+        <item name="android:taskOpenEnterAnimation">@anim/tfm_enter</item>
+        <item name="android:taskOpenExitAnimation">@anim/tfm_exit</item>
+        <item name="android:taskCloseEnterAnimation">@anim/tfm_pop_enter</item>
+        <item name="android:taskCloseExitAnimation">@anim/tfm_pop_exit</item>
+    </style>
+
+    <!-- Dialog entrance: scale + fade with a tiny overshoot. -->
+    <style name="TfmDialogAnim" parent="@android:style/Animation.Dialog">
+        <item name="android:windowEnterAnimation">@anim/tfm_dialog_in</item>
+        <item name="android:windowExitAnimation">@anim/tfm_dialog_out</item>
+    </style>
+
+    <style name="TfmSheetAnim" parent="@android:style/Animation.Dialog">
+        <item name="android:windowEnterAnimation">@anim/tfm_sheet_in</item>
+        <item name="android:windowExitAnimation">@anim/tfm_sheet_out</item>
+    </style>
+
+    <style name="TfmDialogDark" parent="android:style/Theme.Material.Dialog.Alert">
+        <item name="android:windowAnimationStyle">@style/TfmDialogAnim</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:colorAccent">#62E6C8</item>
+    </style>
+
+    <style name="TfmDialogLight" parent="android:style/Theme.Material.Light.Dialog.Alert">
+        <item name="android:windowAnimationStyle">@style/TfmDialogAnim</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:colorAccent">#00967F</item>
     </style>
 </resources>

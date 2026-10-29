@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1200" height="260" viewBox="0 0 1200 260" role="img" aria-labelledby="title desc"><title id="title">Installation process</title><desc id="desc">Four animated steps from downloading the APK to connecting Termux and using the workspace.</desc>
+<style><![CDATA[
+@keyframes drifting{0%,100%{transform:translateY(0px)}50%{transform:translateY(-8px)}}
+@keyframes breathe{0%,100%{opacity:.42}50%{opacity:1}}
+@keyframes dash{to{stroke-dashoffset:-36}}
+@keyframes sweep{0%{opacity:0;transform:translateX(-25px)}20%,82%{opacity:1}100%{opacity:0;transform:translateX(24px)}}
+@keyframes reveal{0%,13%{opacity:.28}18%,75%{opacity:1}100%{opacity:.28}}
+@keyframes trace{0%{stroke-dashoffset:240}100%{stroke-dashoffset:0}}
+.drift{animation:drifting 5s ease-in-out infinite;transform-origin:center}
+.breathe{animation:breathe 3s ease-in-out infinite}
+.moving{stroke-dasharray:9 9;animation:dash 1.7s linear infinite}
+.node-a{animation:reveal 9s ease-in-out infinite}
+.node-b{animation:reveal 9s ease-in-out 1.5s infinite}
+.node-c{animation:reveal 9s ease-in-out 3s infinite}
+.node-d{animation:reveal 9s ease-in-out 4.5s infinite}
+.node-e{animation:reveal 9s ease-in-out 6s infinite}
+@media(prefers-reduced-motion:reduce){.drift,.breathe,.moving,.node-a,.node-b,.node-c,.node-d,.node-e{animation:none}}
+]]></style>
+<defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#0a1527"/><stop offset=".58" stop-color="#101c32"/><stop offset="1" stop-color="#08111e"/></linearGradient>
+<linearGradient id="shine" x1="0" x2="1" y1="0" y2="0"><stop stop-color="#70f2d5"/><stop offset="1" stop-color="#a2a5ff"/></linearGradient>
+<pattern id="grid" width="42" height="42" patternUnits="userSpaceOnUse"><path d="M42 0H0V42" fill="none" stroke="#ffffff" stroke-opacity=".035"/></pattern>
+<filter id="glow"><feGaussianBlur stdDeviation="21"/></filter>
+<filter id="shadow" x="-30%" y="-30%" width="160%" height="160%"><feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#000" flood-opacity=".3"/></filter></defs>
+<rect width="1200" height="260" rx="25" fill="url(#bg)"/><rect width="1200" height="260" rx="25" fill="url(#grid)"/><rect x="50" y="67" width="247" height="133" rx="16" fill="#14283a" stroke="#66e6d0" stroke-opacity=".33"/><text x="72" y="102" fill="#66e6d0" font-size="19" font-family="Inter, Segoe UI, Arial, sans-serif" font-weight="800" >01</text><text x="72" y="140" fill="#f0f7ff" font-size="21" font-family="Inter, Segoe UI, Arial, sans-serif" font-weight="750" >GET APK</text><text x="72" y="168" fill="#9aafc4" font-size="15" font-family="Inter, Segoe UI, Arial, sans-serif" font-weight="400" >GitHub Releases</text><path d="M297 133 L341 133" stroke="#66e6d0" stroke-width="3" fill="none" class="moving"/><rect x="341" y="67" width="247" height="133" rx="16" fill="#14283a" stroke="#a3a2ff" stroke-opacity=".33"/><text x="363" y="102" fill="#a3a2ff" font-size="19" font-family="Inter, Segoe UI, Arial, sans-serif" font-weight="800" >02</text><text x="363" y="140" fill="#f0f7ff" font-size="21" font-family="Inter, Segoe UI, Arial, sans-serif" font-weight="750" >INSTALL</text><text x="363" y="168" fill="#9aafc4" font-size="15" font-family="Inter, Segoe UI, Arial, sans-serif" font-weight="400" >Android package</text><path d="M588 133 L632 133" stroke="#66e6d0" stroke-width="3" fill="none" class="moving"/><rect x="632" y="67" width="247" height="133" rx="16" fill="#14283a" stroke="#66e6d0" stroke-opacity=".33"/><text x="654" y="102" fill="#66e6d0" font-size="19" font-family="Inter, Segoe UI, Arial, sans-serif" font-weight="800" >03</text><text x="654" y="140" fill="#f0f7ff" font-size="21" font-family="Inter, Segoe UI, Arial, sans-serif" font-weight="750" >CONNECT</text><text x="654" y="168" fill="#9aafc4" font-size="15" font-family="Inter, Segoe UI, Arial, sans-serif" font-weight="400" >Termux permission</text><path d="M879 133 L923 133" stroke="#66e6d0" stroke-width="3" fill="none" class="moving"/><rect x="923" y="67" width="247" height="133" rx="16" fill="#14283a" stroke="#a3a2ff" stroke-opacity=".33"/><text x="945" y="102" fill="#a3a2ff" font-size="19" font-family="Inter, Segoe UI, Arial, sans-serif" font-weight="800" >04</text><text x="945" y="140" fill="#f0f7ff" font-size="21" font-family="Inter, Segoe UI, Arial, sans-serif" font-weight="750" >CREATE</text><text x="945" y="168" fill="#9aafc4" font-size="15" font-family="Inter, Segoe UI, Arial, sans-serif" font-weight="400" >Files and AI tools</text><text x="600" y="237" fill="#9aafc4" font-size="14" font-family="Inter, Segoe UI, Arial, sans-serif" font-weight="550" text-anchor="middle" >Android device     /     Signed Release APK     /     Termux installed separately</text></svg>

@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1200" height="435" viewBox="0 0 1200 435" role="img" aria-labelledby="title desc"><title id="title">Termux File Manager — Android workspace</title><desc id="desc">Animated hero showing file management, terminal commands and AI agent integration.</desc>
+<style><![CDATA[
+@keyframes drifting{0%,100%{transform:translateY(0px)}50%{transform:translateY(-8px)}}
+@keyframes breathe{0%,100%{opacity:.42}50%{opacity:1}}
+@keyframes dash{to{stroke-dashoffset:-36}}
+@keyframes sweep{0%{opacity:0;transform:translateX(-25px)}20%,82%{opacity:1}100%{opacity:0;transform:translateX(24px)}}
+@keyframes reveal{0%,13%{opacity:.28}18%,75%{opacity:1}100%{opacity:.28}}
+@keyframes trace{0%{stroke-dashoffset:240}100%{stroke-dashoffset:0}}
+.drift{animation:drifting 5s ease-in-out infinite;transform-origin:center}
+.breathe{animation:breathe 3s ease-in-out infinite}
+.moving{stroke-dasharray:9 9;animation:dash 1.7s linear infinite}
+.node-a{animation:reveal 9s ease-in-out infinite}
+.node-b{animation:reveal 9s ease-in-out 1.5s infinite}
+.node-c{animation:reveal 9s ease-in-out 3s infinite}
+.node-d{animation:reveal 9s ease-in-out 4.5s infinite}
+.node-e{animation:reveal 9s ease-in-out 6s infinite}
+@media(prefers-reduced-motion:reduce){.drift,.breathe,.moving,.node-a,.node-b,.node-c,.node-d,.node-e{animation:none}}
+]]></style>
+<defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#0a1527"/><stop offset=".58" stop-color="#101c32"/><stop offset="1" stop-color="#08111e"/></linearGradient>
+<linearGradient id="shine" x1="0" x2="1" y1="0" y2="0"><stop stop-color="#70f2d5"/><stop offset="1" stop-color="#a2a5ff"/></linearGradient>
+<pattern id="grid" width="42" height="42" patternUnits="userSpaceOnUse"><path d="M42 0H0V42" fill="none" stroke="#ffffff" stroke-opacity=".035"/></pattern>
+<filter id="glow"><feGaussianBlur stdDeviation="21"/></filter>
+<filter id="shadow" x="-30%" y="-30%" width="160%" height="160%"><feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#000" flood-opacity=".3"/></filter></defs>
+<rect width="1200" height="435" fill="url(#bg)" rx="30"/><rect width="1200" height="435" fill="url(#grid)" rx="30"/>
+<circle cx="990" cy="130" r="115" fill="#66e6d0" opacity=".09" filter="url(#glow)"/><circle cx="1030" cy="330" r="150" fill="#a3a2ff" opacity=".10" filter="url(#glow)"/>
+<g transform="translate(66,63)"><rect x="0" y="0" width="94" height="94" rx="24" fill="#0b2631" stroke="#66e6d0" stroke-opacity=".5"/>
+<path d="M19 29 L39 17 L53 27 L74 21 V58 L54 70 L39 62 L19 74 Z" fill="none" stroke="#66e6d0" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M40 17 V62 M54 27 V70 M19 52 L39 43 L54 49 L74 40" fill="none" stroke="#a3a2ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="74" cy="21" r="5" fill="#66e6d0"/></g>
+<text x="181" y="116" fill="#f0f7ff" font-size="67" font-family="Inter, Segoe UI, Arial, sans-serif" font-weight="800" >TFM</text>
+<text x="69" y="213" fill="#f0f7ff" font-size="43" font-family="Inter, Segoe UI, Arial, sans-serif" font-weight="750" >TERMUX FILE MANAGER</text>
+<text x="70" y="255" fill="#9aafc4" font-size="23" font-family="Inter, Segoe UI, Arial, sans-serif" font-weight="400" >A developer workspace that lives on your Android device.</text>
+<text x="70" y="291" fill="#66e6d0" font-size="18" font-family="Inter, Segoe UI, Arial, sans-serif" font-weight="600" >Files  /  Editor  /  Terminal  /  AI Agent  /  Tools</text>
+<rect x="68" y="330" width="185" height="47" rx="12" fill="#164b4c" stroke="#66e6d0" stroke-opacity=".42"/><text x="160" y="361" fill="#66e6d0" font-size="16" font-family="Inter, Segoe UI, Arial, sans-serif" font-weight="750" text-anchor="middle" >ANDROID 6.0+</text>
+<rect x="265" y="330" width="175" height="47" rx="12" fill="#232a4b" stroke="#a3a2ff" stroke-opacity=".42"/><text x="350" y="361" fill="#c3c5ff" font-size="15" font-family="Inter, Segoe UI, Arial, sans-serif" font-weight="750" text-anchor="middle" >JETPACK COMPOSE</text>
+<rect x="452" y="330" width="193" height="47" rx="12" fill="#16304a" stroke="#66e6d0" stroke-opacity=".35"/><text x="548" y="361" fill="#f0f7ff" font-size="15" font-family="Inter, Segoe UI, Arial, sans-serif" font-weight="700" text-anchor="middle" >ENGLISH + ARABIC</text>
+<g class="drift" filter="url(#shadow)"><rect x="766" y="64" width="356" height="316" rx="28" fill="#0b1628" stroke="#66e6d0" stroke-opacity=".31"/>
+<rect x="787" y="86" width="314" height="40" rx="12" fill="#14283b" stroke="#ffffff" stroke-opacity=".10"/><circle cx="809" cy="105" r="5" fill="#66e6d0"/><text x="826" y="111" fill="#f0f7ff" font-size="14" font-family="Inter, Segoe UI, Arial, sans-serif" font-weight="650" >Termux workspace</text>
+<rect x="788" y="143" width="145" height="100" rx="16" fill="#152c38" stroke="#66e6d0" stroke-opacity=".28"/><text x="804" y="169" fill="#66e6d0" font-size="14" font-family="Inter, Segoe UI, Arial, sans-serif" font-weight="750" >Files</text><path d="M806 197 h18 l7 8 h34 v19 h-59 z" fill="none" stroke="#66e6d0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><text x="879" y="222" fill="#9aafc4" font-size="13" font-family="Inter, Segoe UI, Arial, sans-serif" font-weight="400" >/home</text>
+<rect x="948" y="143" width="154" height="100" rx="16" fill="#202840" stroke="#a3a2ff" stroke-opacity=".32"/><text x="964" y="169" fill="#b8b6ff" font-size="14" font-family="Inter, Segoe UI, Arial, sans-serif" font-weight="750" >Agent</text><rect x="964" y="183" width="110" height="7" rx="4" fill="#394c68" stroke="#ffffff" stroke-opacity=".10"/><rect x="964" y="200" width="86" height="7" rx="4" fill="#66e6d0" stroke="#ffffff" stroke-opacity=".10"/><rect x="964" y="217" width="126" height="7" rx="4" fill="#394c68" stroke="#ffffff" stroke-opacity=".10"/>
+<rect x="788" y="258" width="314" height="94" rx="16" fill="#101f32" stroke="#ffffff" stroke-opacity=".10"/><text x="806" y="282" fill="#66e6d0" font-size="16" font-family="Inter, Segoe UI, Arial, sans-serif" font-weight="600" >$  python3 project.py</text><text x="806" y="309" fill="#9aafc4" font-size="13" font-family="Inter, Segoe UI, Arial, sans-serif" font-weight="400" >[ok] execution completed</text><rect x="806" y="322" width="188" height="6" rx="3" fill="#2c4159" stroke="#ffffff" stroke-opacity=".10"/>
+</g>
+<path d="M712 135 L764 135 M712 253 L764 253" stroke="#66e6d0" opacity=".6" class="moving" stroke-width="2" />
+</svg>

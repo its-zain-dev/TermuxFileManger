@@ -1,8 +1,12 @@
 # Termux File Manager · TFM
 
+**[Download signed Android APK releases](https://github.com/its-zain-dev/TermuxFileManger/releases) · [Release installation guide](docs/RELEASES.md) · [Changelog](CHANGELOG.md)**
+
+The official Android Release builds use a **permanent signing key** stored in private GitHub Actions Secrets. No Debug APKs are published.
+
 A native Android workspace for Termux: files, an editor, saved terminal sessions, developer utilities and a multi-provider AI assistant.
 
-**0.4.0 rebuild:** Kotlin, Jetpack Compose and Material 3; English and Arabic; phone and tablet layouts; light, dark and AMOLED themes. Android 6.0+; no root required.
+**0.5.0 update:** Kotlin, Jetpack Compose and Material 3; English and Arabic; phone and tablet layouts; light, dark and AMOLED themes. Android 6.0+; no root required.
 
 ## Workspace
 
@@ -72,16 +76,16 @@ Instrumented tests exercise navigation, locale/theme recreation and, when Termux
 
 `scripts/release.py --build` creates a signing identity once in the ignored, owner-only `.signing/` directory and reuses it for later builds. It runs JVM tests, Android Lint and the signed Release build. An existing identity with a missing keystore is an error, never a reason to silently rotate the key. Preserve that directory privately for future updates; it is never committed or uploaded as a public artifact.
 
-The same script can provision repository Actions Secrets automatically with `--publish-secrets`, using an already authenticated GitHub CLI with permission to manage repository secrets. It checks authorization first and refuses to overwrite an existing signing identity. A normal workflow `GITHUB_TOKEN` cannot create repository secrets. If GitHub denies access, local signed builds still work, but secure repository persistence is not completed.
+For this installation the RSA-3072 signing key was generated off-device and securely imported from an encrypted bundle; the GitHub CLI uploads the existing key as Actions Secrets, so Termux does not need OpenJDK. The older optional local key-generation script also supports `--publish-secrets` with authorized GitHub CLI permissions. It checks authorization first and refuses to overwrite an existing signing identity. A normal workflow `GITHUB_TOKEN` cannot create repository secrets. If GitHub denies access, local signed builds still work, but secure repository persistence is not completed.
 
-The provisioning command stores these four secrets without printing their values:
+The secure signing import stores these four secrets without printing their values:
 
 - `TFM_RELEASE_KEYSTORE_BASE64`
 - `TFM_RELEASE_STORE_PASSWORD`
 - `TFM_RELEASE_KEY_ALIAS`
 - `TFM_RELEASE_KEY_PASSWORD`
 
-GitHub Actions runs bridge/JVM tests, Lint and the Release build. Pull requests upload validation reports and a review artifact; without signing secrets that artifact is unsigned. Pushes to `main` and manual runs publish an APK and checksum only when persistent signing is configured and APK signature verification passes. They refuse to publish an unsigned APK.
+GitHub Actions runs filesystem/JVM tests, Lint and only the Release build. Pull requests validate without access to signing secrets or distributing a Debug APK. Successful pushes to `main` and manual runs publish a signed Release APK with a SHA-256 checksum. All four permanent `TFM_RELEASE_*` secrets must exist; missing secrets stop publication. The private signing key is imported from the encrypted maintainer bundle and uploaded securely through GitHub CLI, without requiring Java on your Android device. Never commit the key or passwords.
 
 Direct Gradle builds also accept `TFM_RELEASE_KEYSTORE_PATH` plus the three password/alias variables. Without signing configuration, direct Gradle output is unsigned. A newly generated key cannot update an app signed by an older, different key. Keys and passwords must never be committed.
 

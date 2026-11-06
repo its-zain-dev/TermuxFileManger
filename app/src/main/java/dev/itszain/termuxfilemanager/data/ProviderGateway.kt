@@ -54,12 +54,19 @@ class ProviderGateway(private val context: Context, private val client: OkHttpCl
                         val output = StringBuilder()
                         var completed = false
                         var hasToolCalls = false
+                        var hasThinking = false
                         val onCall: (AiEvent.ToolCall) -> Unit = { hasToolCalls = true; trySendBlocking(it) }
-                        val onOutput: (List<String>) -> Unit = { trySendBlocking(AiEvent.ResponseOutput(it)) }
+                        val onOutput: (List<String>) -> Unit = { items ->
+                            if(items.any { runCatching { JSONObject(it).optString("type") == "reasoning" }.getOrDefault(false) }) hasThinking = true
+                            trySendBlocking(AiEvent.ResponseOutput(items))
+                        }
                         var eventName = ""
                         val listener = object : AiApiClient.StreamListener {
                             override fun onText(fragment: String) { trySendBlocking(AiEvent.Text(fragment)) }
-                            override fun onThinking(fragment: String) { trySendBlocking(AiEvent.Thinking(fragment)) }
+                            override fun onThinking(fragment: String) {
+                                if(fragment.isNotBlank()) hasThinking = true
+                                trySendBlocking(AiEvent.Thinking(fragment))
+                            }
                         }
                         val source = requireNotNull(reply.body).source()
                         if (reply.header("Content-Type", "").orEmpty().contains("text/event-stream", ignoreCase = true) || source.peek().readUtf8Line()?.let { it.startsWith("data:") || it.startsWith("event:") || it.startsWith(":") } == true) {
@@ -84,7 +91,7 @@ class ProviderGateway(private val context: Context, private val client: OkHttpCl
                         }
                         if (!call.isCanceled()) {
                             check(provider.id != "chatgpt" || completed) { "chatgpt_incomplete" }
-                            check(output.isNotBlank() || hasToolCalls) { "empty_response" }
+                            check(output.isNotBlank() || hasToolCalls || hasThinking) { "empty_response" }
                             trySendBlocking(AiEvent.Complete(output.toString()))
                             close()
                         }

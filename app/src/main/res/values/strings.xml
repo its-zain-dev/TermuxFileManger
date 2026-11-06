@@ -237,7 +237,7 @@
     <string name="empty_response">The provider returned no text.</string>
     <string name="agent_stopped">Assistant stopped. A command already sent to Termux may still be running.</string>
     <string name="agent_no_progress">Stopped after repeated steps without progress.</string>
-    <string name="agent_step_limit">The assistant reached the 24-step limit. Send a new message to continue.</string>
+    <string name="agent_step_limit">The assistant reached the 24-tool-round limit. Send a new message to continue.</string>
     <string name="tool_disabled">This tool is disabled in your agent settings.</string>
     <string name="manual_approval_required">This action needs your approval even with automatic execution enabled.</string>
     <string name="action_declined">Action declined. No new command was sent.</string>

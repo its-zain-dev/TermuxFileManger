@@ -237,7 +237,7 @@
     <string name="empty_response">لم يُرجع المزوّد نصًا.</string>
     <string name="agent_stopped">توقف المساعد. قد يستمر أمر سبق إرساله إلى Termux.</string>
     <string name="agent_no_progress">توقف بعد تكرار خطوات دون تقدم.</string>
-    <string name="agent_step_limit">بلغ المساعد حد ٢٤ خطوة. أرسل رسالة جديدة للمتابعة.</string>
+    <string name="agent_step_limit">وصل المساعد إلى حد ٢٤ جولة لاستخدام الأدوات. أرسل رسالة جديدة للمتابعة.</string>
     <string name="tool_disabled">هذه الأداة معطّلة في إعدادات المساعد.</string>
     <string name="manual_approval_required">يتطلب هذا الإجراء موافقتك حتى مع تفعيل التنفيذ التلقائي.</string>
     <string name="action_declined">تم رفض الإجراء. لم يُرسل أمر جديد.</string>

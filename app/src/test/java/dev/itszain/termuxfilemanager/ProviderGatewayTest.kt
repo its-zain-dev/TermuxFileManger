@@ -73,6 +73,32 @@ class ProviderGatewayTest {
         server.enqueue(MockResponse().setHeader("Content-Type", "text/event-stream").setBody("data: not-json\n\n"))
         try { gateway("openai").stream(AiRequest("openai", listOf("user" to "hi"))).toList(); fail("Expected malformed event") } catch(_: org.json.JSONException) { }
     }
+    @Test fun openAiReasoningOnlyStreamIsAccepted() = runBlocking {
+        server.enqueue(MockResponse().setHeader("Content-Type", "text/event-stream").setBody(
+            "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"working through the problem\"}}]}\n\n" +
+            "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+            "data: [DONE]\n\n"))
+        val events = gateway("openai").stream(AiRequest("openai", listOf("user" to "Solve this"))).toList()
+        assertEquals("working through the problem", events.filterIsInstance<AiEvent.Thinking>().joinToString("") { it.value })
+        assertEquals("", (events.last() as AiEvent.Complete).value)
+    }
+
+    @Test fun chatGptReasoningOnlyResponseIsAcceptedForContinuation() = runBlocking {
+        val final = "{\"response\":{\"status\":\"completed\",\"output\":[{\"type\":\"reasoning\",\"id\":\"rs-1\",\"summary\":[]}]}}"
+        server.enqueue(MockResponse().setHeader("Content-Type", "text/event-stream")
+            .setBody("event: response.completed\ndata: $final\n\n"))
+        val routed = client.newBuilder().addInterceptor { chain ->
+            chain.proceed(chain.request().newBuilder().url(server.url("/v1/responses")).build())
+        }.build()
+        AiSecureStore.settings(context).edit().putString("model_chatgpt", "test-model").commit()
+        val api = ProviderGateway(context, routed, { "unused" }, { true }, { "plan-token" })
+        val events = api.stream(AiRequest("chatgpt", listOf("user" to "Think through this"),
+            nativeTools = setOf("app_info"))).toList()
+        assertEquals("", (events.last() as AiEvent.Complete).value)
+        assertEquals("reasoning", JSONObject(events.filterIsInstance<AiEvent.ResponseOutput>().single().items.single()).getString("type"))
+        server.takeRequest()
+    }
+
     @Test fun cancellationClosesTheInFlightRequest() = runBlocking {
         server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE))
         val job = launch(Dispatchers.IO) { gateway("openai").stream(AiRequest("openai", listOf("user" to "hi"))).collect() }

@@ -45,11 +45,15 @@ class AgentController(private val graph: AppGraph, private val ai: AiGateway = g
         // Synchronization can change the workspace, so it is not run merely for greetings or model identity questions.
         val failures = mutableSetOf<String>()
         var invalid = 0
-        for(step in 0 until 24) {
+        var requestCount = 0
+        var toolRounds = 0
+        var silentThinkingContext = ""
+        while(true) {
             currentCoroutineContext().ensureActive()
             chat = graph.dao.chat(chatId) ?: return
             val preferences = AiSecureStore.settings(graph.context)
-            if(step > 0) delay(preferences.getInt("rate_gap_seconds", 3).coerceIn(0, 3600) * 1000L)
+            if(requestCount > 0) delay(preferences.getInt("rate_gap_seconds", 3).coerceIn(0, 3600) * 1000L)
+            val requestIndex = requestCount++
             val model = AiSecureStore.getModel(graph.context, chat.provider)
             val native = chat.provider == "chatgpt"
             val account = if(native) graph.chatGpt.active.value else ""
@@ -64,11 +68,17 @@ class AgentController(private val graph: AppGraph, private val ai: AiGateway = g
             val meta = JSONObject().put("request_provider", chat.provider).put("request_model", model).put("request_account", account)
             var record = MessageRecord(UUID.randomUUID().toString(), chatId, "assistant", "", status = "streaming", metadata = meta.toString())
             graph.dao.saveMessage(record)
+            val requestContext = buildString {
+                append("[SESSION FACTS]\n").append(facts)
+                if(silentThinkingContext.isNotBlank()) append("\n[CONTINUATION CONTEXT]\n").append(silentThinkingContext)
+            }
+            val requestHistory = if(silentThinkingContext.isBlank()) history else
+                history + ("user" to ("[CONTINUATION CONTEXT]\n" + silentThinkingContext))
             val calls = linkedMapOf<String, AiEvent.ToolCall>()
             var lastSave = 0L
             try {
-                ai.stream(AiRequest(chat.provider, history, if(native || step == 0) image else "", if(native) enabled else emptySet(),
-                    if(native) ResponsesHistory.build(rows, model, account) else null, model, "[SESSION FACTS]\n$facts")).collect { event ->
+                ai.stream(AiRequest(chat.provider, requestHistory, if(native || requestIndex == 0) image else "", if(native) enabled else emptySet(),
+                    if(native) ResponsesHistory.build(rows, model, account) else null, model, requestContext)).collect { event ->
                     when(event) {
                         is AiEvent.Text -> record = record.copy(text = record.text + event.value)
                         is AiEvent.Thinking -> record = record.copy(thinking = record.thinking + event.value)
@@ -94,14 +104,28 @@ class AgentController(private val graph: AppGraph, private val ai: AiGateway = g
                     message(chatId, "agent_control", "Your tool request was invalid. Use a provided native function, or ONLY one valid tfm_action object for the legacy protocol. Do not print raw JSON in your answer.")
                     continue
                 }
+                val hasReasoningOutput = runCatching {
+                    val output = JSONObject(record.metadata).optJSONArray("response_output")
+                    output != null && (0 until output.length()).any { output.getJSONObject(it).optString("type") == "reasoning" }
+                }.getOrDefault(false)
+                if(record.text.isBlank() && (record.thinking.isNotBlank() || hasReasoningOutput)) {
+                    val continuation = buildString {
+                        append("The previous model response contained internal reasoning only, without a user-facing answer or tool call. Continue solving the original user request from that work. Do not repeat or expose internal reasoning; provide the final answer or call an appropriate tool only when ready.")
+                        if(record.thinking.isNotBlank()) append("\n\nPrevious reasoning context:\n").append(record.thinking)
+                    }
+                    silentThinkingContext = (silentThinkingContext + "\n\n" + continuation).takeLast(12000)
+                    continue
+                }
                 return
             }
             if(legacy?.tool == "finish") { graph.dao.saveMessage(record.copy(text = legacy.value("message").ifBlank { legacy.value("content") })); return }
-            if(legacy?.tool == "continue") { if(invalid++ >= 2) { message(chatId, "status", "agent_no_progress"); return }; continue }
+            if(legacy?.tool == "continue") continue
             if(legacy != null) { meta.put("tool_request", true); graph.dao.saveMessage(record.copy(text = JSONObject().put("tfm_action", JSONObject(legacy.json)).toString(), metadata = meta.toString())) }
             val work = if(calls.isNotEmpty()) calls.values.toList() else listOf<AiEvent.ToolCall?>(null)
             for(call in work) {
                 currentCoroutineContext().ensureActive()
+                if(toolRounds >= 24) { message(chatId, "status", "agent_step_limit"); return }
+                toolRounds++
                 var action: AgentAction? = null
                 var toolRecord = MessageRecord(UUID.randomUUID().toString(), chatId, "tool_call", "", status = "running")
                 val toolMeta = JSONObject().put("tool_name", call?.name ?: legacy!!.tool).put("call_id", call?.id.orEmpty())
@@ -148,6 +172,5 @@ class AgentController(private val graph: AppGraph, private val ai: AiGateway = g
                 }
             }
         }
-        message(chatId, "status", "agent_step_limit")
     }
 }

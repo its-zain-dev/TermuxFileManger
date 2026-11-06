@@ -96,7 +96,7 @@ class ProviderGatewayTest {
             nativeTools = setOf("app_info"))).toList()
         assertEquals("", (events.last() as AiEvent.Complete).value)
         assertEquals("reasoning", JSONObject(events.filterIsInstance<AiEvent.ResponseOutput>().single().items.single()).getString("type"))
-        server.takeRequest()
+        assertNotNull(server.takeRequest())
     }
 
     @Test fun cancellationClosesTheInFlightRequest() = runBlocking {

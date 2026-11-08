@@ -86,8 +86,8 @@ private inline fun <reified T : ViewModel> factory(crossinline create: () -> T) 
                     var incomingCommand by rememberSaveable { mutableStateOf("") }
                     var editorExit by remember { mutableStateOf(false) }
                     val error by workspace.error.collectAsStateWithLifecycle()
-                    val destinations = listOf("files" to R.string.files, "terminal" to R.string.terminal, "assistant" to R.string.assistant, "tools" to R.string.tools)
-                    val icons = listOf(Icons.Outlined.FolderOpen, Icons.Outlined.Terminal, Icons.Outlined.AutoAwesome, Icons.Outlined.Widgets)
+                    val destinations = listOf("files" to R.string.files, "terminal" to R.string.terminal, "assistant" to R.string.assistant, "opencode" to R.string.opencode, "tools" to R.string.tools)
+                    val icons = listOf(Icons.Outlined.FolderOpen, Icons.Outlined.Terminal, Icons.Outlined.AutoAwesome, Icons.Outlined.Extension, Icons.Outlined.Widgets)
                     val title = destinations.firstOrNull { it.first == route }?.second ?: when { route.startsWith("editor") -> R.string.editor; route == "setup" -> R.string.connect_termux; else -> R.string.settings }
                     val root = destinations.any { it.first == route }
                     fun go(destination: String) { nav.navigate(destination) { popUpTo("files") { saveState = true }; launchSingleTop = true; restoreState = true } }
@@ -114,9 +114,10 @@ private inline fun <reified T : ViewModel> factory(crossinline create: () -> T) 
                                 NavHost(navController = nav, startDestination = "files", modifier = Modifier.weight(1f).fillMaxHeight()) {
                                     composable("files") { FilesScreen(files, { nav.navigate("editor/${Uri.encode(it)}") }, ::openTerminal, { nav.navigate("setup") }) }
                                     composable("terminal") { TerminalScreen(workspace, incomingPath, incomingCommand) { incomingPath = ""; incomingCommand = "" } }
-                                    composable("assistant") { AssistantScreen(workspace, { nav.navigate("settings") }, ::openTerminal) }
+                                    composable("assistant") { AssistantScreen(workspace, { nav.navigate("settings") }, ::openTerminal, { go("opencode") }) }
+                                    composable("opencode") { OpenCodeScreen(graph) { path, command -> openTerminal(path, command) } }
                                     composable("tools") { ToolsScreen(workspace) { workspace.suggestedPrompt.value = it; go("assistant") } }
-                                    composable("settings") { SettingsScreen(graph) { nav.navigate("setup") } }
+                                    composable("settings") { SettingsScreen(graph, { nav.navigate("setup") }, { go("opencode") }) }
                                     composable("setup") { SetupScreen(graph) { files.refresh() } }
                                     composable("editor/{path}") { back -> EditorScreen(editor, back.arguments?.getString("path").orEmpty(), editorExit, { editorExit = false }) { nav.popBackStack(); files.refresh() } }
                                 }

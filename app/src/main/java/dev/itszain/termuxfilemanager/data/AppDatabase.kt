@@ -44,6 +44,7 @@ interface AppDao {
     @Upsert suspend fun saveSession(session: SessionRecord)
     @Query("DELETE FROM sessions WHERE id=:id") suspend fun deleteSession(id: String)
     @Query("DELETE FROM commands WHERE ownerId=:id") suspend fun deleteCommands(id: String)
+    @Query("DELETE FROM commands WHERE id=:id") suspend fun deleteCommand(id: Long)
     @Query("DELETE FROM commands WHERE kind='files' AND completed IS NOT NULL AND id NOT IN (SELECT id FROM commands WHERE kind='files' ORDER BY created DESC LIMIT 100)") suspend fun pruneFileResults()
     @Insert suspend fun insertCommand(command: CommandRecord): Long
     @Query("SELECT * FROM commands WHERE id=:id") suspend fun command(id: Long): CommandRecord?

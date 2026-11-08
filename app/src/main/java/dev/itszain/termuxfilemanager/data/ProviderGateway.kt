@@ -25,9 +25,14 @@ class ProviderGateway(private val context: Context, private val client: OkHttpCl
     .followRedirects(false).followSslRedirects(false).build(),
     private val keyFor: (String) -> String = { AiSecureStore.getKey(context, it) },
     private val allowRequest: (String) -> Boolean = { AiSecureStore.allowRequest(context, it) },
-    private val planToken: suspend () -> String = { context.graph().chatGpt.accessToken() }) : AiGateway {
+    private val planToken: suspend () -> String = { context.graph().chatGpt.accessToken() },
+    private val openCode: OpenCodeGateway? = null) : AiGateway {
     val modelNames = java.util.concurrent.ConcurrentHashMap<String, String>()
-    override fun stream(request: AiRequest): Flow<AiEvent> = callbackFlow {
+    override fun stream(request: AiRequest): Flow<AiEvent> {
+        if (request.provider == "opencode") return requireNotNull(openCode) { "opencode_unavailable" }.stream(request)
+        return remoteStream(request)
+    }
+    private fun remoteStream(request: AiRequest): Flow<AiEvent> = callbackFlow {
         val provider = AiProvider.byId(request.provider)
         val key = if(provider.id == "chatgpt") planToken() else keyFor(provider.id)
         require(key.isNotBlank()) { "missing_key" }
@@ -127,6 +132,7 @@ class ProviderGateway(private val context: Context, private val client: OkHttpCl
         throw ApiFailure(response.code, detail?.take(1000) ?: "HTTP ${response.code}", response.header("Retry-After").orEmpty())
     }
     suspend fun models(providerId: String): List<String> {
+        if (providerId == "opencode") return requireNotNull(openCode) { "opencode_unavailable" }.models()
         val provider = AiProvider.byId(providerId)
         val endpoint = AiSecureStore.getEndpoint(context, providerId)
         val address = when (provider.type) {

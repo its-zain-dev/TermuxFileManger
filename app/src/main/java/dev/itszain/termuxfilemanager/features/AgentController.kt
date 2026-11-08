@@ -78,7 +78,10 @@ class AgentController(private val graph: AppGraph, private val ai: AiGateway = g
             var lastSave = 0L
             try {
                 ai.stream(AiRequest(chat.provider, requestHistory, if(native || requestIndex == 0) image else "", if(native) enabled else emptySet(),
-                    if(native) ResponsesHistory.build(rows, model, account) else null, model, requestContext)).collect { event ->
+                    if(native) ResponsesHistory.build(rows, model, account) else null, model, requestContext,
+                    sessionKey = chatId, sessionTitle = chat.name,
+                    workdir = graph.dao.session(chat.sessionId)?.workdir ?: "~/",
+                    autoApprove = chat.autoExecute ?: preferences.getBoolean("agent_auto_execute", false))).collect { event ->
                     when(event) {
                         is AiEvent.Text -> record = record.copy(text = record.text + event.value)
                         is AiEvent.Thinking -> record = record.copy(thinking = record.thinking + event.value)
@@ -97,6 +100,9 @@ class AgentController(private val graph: AppGraph, private val ai: AiGateway = g
                 withContext(NonCancellable) { graph.dao.saveMessage(record.copy(status = "interrupted")) }; throw error
             }
             currentCoroutineContext().ensureActive()
+            // OpenCode runs its own tools and sessions. Its prose must never be parsed as
+            // the app's legacy tfm_action protocol, and it needs no extra agent loop here.
+            if(chat.provider == "opencode") return
             val legacy = if(calls.isEmpty()) AgentAction.parse(record.text) else null
             if(calls.isEmpty() && legacy == null) {
                 if(record.text.contains("\"tfm_action\"") && invalid++ < 2) {

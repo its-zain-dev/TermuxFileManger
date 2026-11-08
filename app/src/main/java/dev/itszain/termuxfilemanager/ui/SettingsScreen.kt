@@ -4,6 +4,7 @@ import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
@@ -25,7 +26,7 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collect
 import org.json.JSONArray
 
-@Composable fun SettingsScreen(graph: AppGraph, setup: () -> Unit) {
+@Composable fun SettingsScreen(graph: AppGraph, setup: () -> Unit, openOpenCode: () -> Unit = {}) {
     val appearance by graph.settings.appearance.collectAsStateWithLifecycle(AppSettings())
     val context = LocalContext.current
     val chatAccounts by graph.chatGpt.accounts.collectAsStateWithLifecycle()
@@ -68,6 +69,12 @@ import org.json.JSONArray
         }
     }
     suspend fun saveProvider() {
+        if(provider.id == "opencode") {
+            graph.settings.set("provider", provider.id)
+            graph.settings.set("model_opencode", model.trim())
+            AgentWorkspace.persistSettings(context)
+            return
+        }
         require(endpoint.startsWith("https://")) { "https_required" }
         require(model.isNotBlank()) { "missing_model" }
         graph.settings.set("provider", provider.id)
@@ -79,6 +86,10 @@ import org.json.JSONArray
     LaunchedEffect(provider.id, revision) {
         model = AiSecureStore.getModel(context, provider.id); endpoint = AiSecureStore.getEndpoint(context, provider.id)
         hasKey = withContext(Dispatchers.IO) { runCatching { AiSecureStore.getKey(context, provider.id).isNotBlank() }.getOrDefault(false) }; key = ""
+        if(provider.id == "opencode" && model.isBlank()) {
+            val found = withContext(Dispatchers.IO) { runCatching { graph.ai.models("opencode") }.getOrNull() }.orEmpty()
+            if(found.isNotEmpty()) { model = found.first(); graph.settings.set("model_opencode", model) }
+        }
     }
     LaunchedEffect(activeAccount) {
         if(activeAccount.isNotBlank()) {
@@ -116,9 +127,10 @@ import org.json.JSONArray
         item { TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://chatgpt.com/settings/usage"))) }) { Text(stringResource(R.string.chatgpt_usage)) } }
         item { SectionTitle(stringResource(R.string.provider)) }
         item { ChoiceMenu(provider.name, AiProvider.all(), { it.name }, { provider = it }) }
+        if(provider.id == "opencode") item { OpenCodeSettingsCard(graph, openOpenCode) }
         item { OutlinedTextField(model, { model = it }, label = { Text(stringResource(R.string.model)) }, singleLine = true, modifier = Modifier.fillMaxWidth()) }
-        if(provider.id != "chatgpt") item { OutlinedTextField(endpoint, { endpoint = it }, label = { Text(stringResource(R.string.endpoint)) }, maxLines = 3, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri)) }
-        if(provider.id != "chatgpt") item { OutlinedTextField(key, { key = it }, label = { Text(stringResource(R.string.api_key)) }, supportingText = { if(hasKey) Text(stringResource(R.string.key_saved)) }, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth()) }
+        if(provider.id != "chatgpt" && provider.id != "opencode") item { OutlinedTextField(endpoint, { endpoint = it }, label = { Text(stringResource(R.string.endpoint)) }, maxLines = 3, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri)) }
+        if(provider.id != "chatgpt" && provider.id != "opencode") item { OutlinedTextField(key, { key = it }, label = { Text(stringResource(R.string.api_key)) }, supportingText = { if(hasKey) Text(stringResource(R.string.key_saved)) }, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth()) }
         item { Button(enabled = !busy, onClick = { task { saveProvider(); "saved" } }, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.save_provider)) } }
         item { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(enabled = !busy, onClick = { task { saveProvider(); val found = graph.ai.models(provider.id); withContext(Dispatchers.Main) { modelChoices = found }; "" } }, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.discover_models)) }
@@ -126,7 +138,7 @@ import org.json.JSONArray
         } }
         item { Row {
             TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(provider.docs))) }) { Text(stringResource(R.string.documentation)) }
-            if(hasKey && provider.id != "chatgpt") TextButton(onClick = { removeKey = true }) { Text(stringResource(R.string.remove_key), color = MaterialTheme.colorScheme.error) }
+            if(hasKey && provider.id != "chatgpt" && provider.id != "opencode") TextButton(onClick = { removeKey = true }) { Text(stringResource(R.string.remove_key), color = MaterialTheme.colorScheme.error) }
         } }
         item { SectionTitle(stringResource(R.string.usage_limits)) }
         item { NumberField(daily, { daily = it }, R.string.daily_requests) }
@@ -177,4 +189,53 @@ import org.json.JSONArray
 }
 @Composable private fun SettingSwitch(label: String, enabled: Boolean, change: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text(label, Modifier.weight(1f)); Switch(enabled, change) }
+}
+@Composable private fun OpenCodeSettingsCard(graph: AppGraph, openOpenCode: () -> Unit) {
+    val status by graph.openCode.status.collectAsStateWithLifecycle()
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    var busy by remember { mutableStateOf(false) }
+    var message by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) { if(!status.checked) runCatching { graph.openCode.refresh() } }
+    fun run(task: suspend () -> String) {
+        if(busy) return
+        busy = true
+        scope.launch {
+            try { message = task() }
+            catch(cancelled: CancellationException) { throw cancelled }
+            catch(error: Exception) { message = error.message }
+            finally { busy = false }
+        }
+    }
+    Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainer) {
+        Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(stringResource(R.string.opencode), style = MaterialTheme.typography.titleSmall)
+            Text(
+                when {
+                    !status.supported -> errorText(status.supportReason)
+                    !status.installed -> stringResource(R.string.opencode_not_installed)
+                    !status.compatible -> stringResource(R.string.opencode_unsupported_version)
+                    else -> status.version.ifBlank { stringResource(R.string.opencode_installed) }
+                },
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if(busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if(!status.installed) OutlinedButton(enabled = !busy && status.supported, onClick = { run { graph.openCode.install().message } }) {
+                    Text(stringResource(R.string.opencode_install))
+                }
+                if(status.installed) {
+                    OutlinedButton(enabled = !busy, onClick = { run { graph.openCode.upgrade().message } }) { Text(stringResource(R.string.opencode_update)) }
+                    OutlinedButton(onClick = openOpenCode) { Text(stringResource(R.string.opencode_open_ui)) }
+                }
+            }
+            if(status.installed) TextButton(onClick = {
+                val url = status.url.ifBlank { graph.openCode.storedUrl() }
+                if(url.isNotBlank()) runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+            }) { Text(stringResource(R.string.opencode_open_browser)) }
+        }
+    }
+    message?.let { text ->
+        AlertDialog(onDismissRequest = { message = null }, text = { Text(errorText(text)) },
+            confirmButton = { TextButton(onClick = { message = null }) { Text(stringResource(R.string.close)) } })
+    }
 }

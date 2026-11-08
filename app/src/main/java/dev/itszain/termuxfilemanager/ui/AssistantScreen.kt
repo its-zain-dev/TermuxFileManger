@@ -38,7 +38,7 @@ import java.util.UUID
 import org.json.JSONObject
 
 @OptIn(ExperimentalLayoutApi::class)
-@Composable fun AssistantScreen(model: WorkspaceModel, settings: () -> Unit, terminal: (String, String) -> Unit) {
+@Composable fun AssistantScreen(model: WorkspaceModel, settings: () -> Unit, terminal: (String, String) -> Unit, openOpenCode: () -> Unit) {
     val chats by model.chats.collectAsStateWithLifecycle()
     val sessions by model.sessions.collectAsStateWithLifecycle()
     val chatId by model.chatId.collectAsStateWithLifecycle()
@@ -59,6 +59,8 @@ import org.json.JSONObject
     var broadcast by remember { mutableStateOf(false) }
     var autoConfirm by remember { mutableStateOf(false) }
     var preferredProvider by remember { mutableStateOf(AiSecureStore.getActiveProvider(context)) }
+    val providerId = chat?.provider ?: preferredProvider
+    val openCodeStatus by model.graph.openCode.status.collectAsStateWithLifecycle()
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if(uri != null) scope.launch {
             try {
@@ -75,6 +77,7 @@ import org.json.JSONObject
         }
     }
     LaunchedEffect(suggested) { suggested?.let { prompt = it; model.suggestedPrompt.value = null } }
+    LaunchedEffect(providerId) { if(providerId == "opencode") runCatching { model.graph.openCode.refresh() } }
     val list = rememberLazyListState()
     LaunchedEffect(chatId) { if(messages.isNotEmpty()) list.scrollToItem(messages.lastIndex) }
     LaunchedEffect(messages.lastOrNull()?.text, messages.size) {
@@ -96,13 +99,37 @@ import org.json.JSONObject
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            ChoiceMenu(AiProvider.byId(chat?.provider ?: preferredProvider).name, AiProvider.all(), { it.name }, { provider ->
+            ChoiceMenu(AiProvider.byId(providerId).name, AiProvider.all(), { it.name }, { provider ->
                 if(chat != null) model.saveChat(chat.copy(provider = provider.id)) else { preferredProvider = provider.id; scope.launch { model.graph.settings.set("provider", provider.id) } }
             }, Modifier.weight(1f))
             ChoiceMenu(sessions.firstOrNull { it.id == chat?.sessionId }?.name ?: stringResource(R.string.session), sessions, { it.name }, { if(chat != null) model.saveChat(chat.copy(sessionId = it.id)) else model.selectSession(it.id) }, Modifier.weight(1f))
         }
-        Text(AiSecureStore.getModel(context, chat?.provider ?: preferredProvider).ifBlank { stringResource(R.string.at_model_hint) },
+        Text(AiSecureStore.getModel(context, providerId).ifBlank { stringResource(R.string.at_model_hint) },
             style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if(providerId == "opencode") {
+            val ready = openCodeStatus.installed && openCodeStatus.compatible
+            Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
+                Row(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.Extension, null)
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(stringResource(R.string.opencode), style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            when {
+                                !openCodeStatus.supported -> stringResource(R.string.opencode_not_supported)
+                                !ready -> stringResource(R.string.opencode_install_short)
+                                else -> stringResource(R.string.opencode_ready)
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                    }
+                    TextButton(onClick = openOpenCode) {
+                        Text(stringResource(if(ready) R.string.opencode_open_ui else R.string.opencode_setup_action))
+                    }
+                }
+            }
+        }
         LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = list, verticalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(vertical = 12.dp)) {
             if(messages.isEmpty()) item {
                 EmptyPane(stringResource(R.string.chat_empty), stringResource(R.string.chat_empty_body), Icons.Outlined.AutoAwesome) {

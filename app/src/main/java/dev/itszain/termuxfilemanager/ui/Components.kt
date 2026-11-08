@@ -59,6 +59,24 @@ import java.util.Date
         "chatgpt_incomplete" -> R.string.chatgpt_incomplete
         "subscription_sharing_usage_limit_exceeded" -> R.string.subscription_sharing_usage_limit_exceeded
         "subscription_sharing_usage_unavailable" -> R.string.subscription_sharing_usage_unavailable
+        "opencode_not_installed" -> R.string.opencode_not_installed
+        "opencode_unsupported_android" -> R.string.opencode_unsupported_android
+        "opencode_unsupported_cpu" -> R.string.opencode_unsupported_cpu
+        "opencode_unsupported_version" -> R.string.opencode_unsupported_version
+        "opencode_already_installed" -> R.string.opencode_already_installed
+        "opencode_installed" -> R.string.opencode_installed_message
+        "opencode_updated" -> R.string.opencode_updated
+        "opencode_install_failed" -> R.string.opencode_install_failed
+        "opencode_start_failed" -> R.string.opencode_start_failed
+        "opencode_no_password" -> R.string.opencode_no_password
+        "opencode_pair_failed" -> R.string.opencode_pair_failed
+        "opencode_auth_failed" -> R.string.opencode_auth_failed
+        "opencode_session_failed" -> R.string.opencode_session_failed
+        "opencode_stream_unavailable" -> R.string.opencode_stream_unavailable
+        "opencode_run_failed" -> R.string.opencode_run_failed
+        "opencode_run_interrupted" -> R.string.opencode_run_interrupted
+        "opencode_permission_rejected" -> R.string.opencode_permission_rejected
+        "opencode_no_text" -> R.string.opencode_no_text
         else -> 0
     }
     return if (id == 0) { if (code.contains("Timed out")) stringResource(R.string.command_pending) else code } else stringResource(id)

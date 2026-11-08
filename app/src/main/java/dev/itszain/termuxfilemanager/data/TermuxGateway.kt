@@ -41,12 +41,14 @@ class TermuxGateway(private val context: Context, private val dao: AppDao) : Com
         }
         id
     }
-    override suspend fun execute(spec: CommandSpec): CommandResult {
+    override suspend fun execute(spec: CommandSpec, timeoutMs: Long): CommandResult {
         val id = submit(spec)
         // A timeout never changes a command to 'cancelled': Termux may still be executing it.
-        val result = withTimeout(120_000) { dao.observeCommand(id).filterNotNull().first { it.completed != null } }
+        val result = withTimeout(timeoutMs) { dao.observeCommand(id).filterNotNull().first { it.completed != null } }
         return CommandResult(id, result.stdout, result.stderr, result.exitCode ?: -1)
     }
+    /** Removes a command row after its output was consumed, for internal credentials and pairing links. */
+    suspend fun deleteCommand(id: Long) = dao.deleteCommand(id)
     suspend fun accept(intent: Intent) {
         val id = intent.getIntExtra(CommandResultService.EXTRA_REQUEST_ID, -1).toLong()
         if (id < 0 || dao.command(id) == null) return

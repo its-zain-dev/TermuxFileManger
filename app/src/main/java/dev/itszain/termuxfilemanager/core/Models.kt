@@ -22,7 +22,7 @@ data class CommandResult(val id: Long, val stdout: String, val stderr: String, v
 }
 interface CommandGateway {
     suspend fun submit(spec: CommandSpec): Long
-    suspend fun execute(spec: CommandSpec): CommandResult
+    suspend fun execute(spec: CommandSpec, timeoutMs: Long = 120_000): CommandResult
 }
 interface FileRepository {
     suspend fun list(path: String, query: String = "", hidden: Boolean = true, sort: String = "name", descending: Boolean = false, offset: Int = 0): DirectoryPage
@@ -39,6 +39,7 @@ sealed interface AiEvent {
     data class ResponseOutput(val items: List<String>) : AiEvent
 }
 data class AiRequest(val provider: String, val history: List<Pair<String, String>>, val imagePath: String = "",
-    val nativeTools: Set<String> = emptySet(), val responseItems: List<String>? = null, val model: String = "", val context: String = "")
+    val nativeTools: Set<String> = emptySet(), val responseItems: List<String>? = null, val model: String = "", val context: String = "",
+    val sessionKey: String = "", val sessionTitle: String = "", val workdir: String = "", val autoApprove: Boolean = false)
 interface AiGateway { fun stream(request: AiRequest): Flow<AiEvent> }
 fun shellQuote(value: String) = "'" + value.replace("'", "'\\''") + "'"

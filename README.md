@@ -168,11 +168,20 @@ The assistant can inspect projects, list and read files, search code, propose gu
 <details>
 <summary><strong>Supported AI services and authentication</strong></summary>
 
-TFM supports configurable provider integrations for **OpenAI/ChatGPT, Google Gemini, Anthropic, OpenRouter, Groq, Mistral, Cohere, DeepSeek, xAI and Together AI**. You can select an editable model identifier and HTTPS endpoint with your own supported API credentials.
+TFM supports configurable provider integrations for **OpenAI/ChatGPT, Google Gemini, Anthropic, OpenRouter, Groq, Mistral, Cohere, DeepSeek, xAI and Together AI**, plus a **local OpenCode** service running inside Termux. You can select an editable model identifier and HTTPS endpoint with your own supported API credentials.
 
 Where available in the app, **Continue with ChatGPT** uses a browser-based account sign-in/consent flow with PKCE. Authentication tokens are stored with Android Keystore-backed protection. ChatGPT plan access, availability, model catalogs, supported OAuth capabilities and usage limits depend on the signed-in account and service policies. ChatGPT subscription benefits are not interchangeable with separately billed API credits.
 
 Provider requests transmit the conversation and any explicitly attached files/images to the selected remote endpoint. Review that provider's privacy and billing terms before connecting.
+
+</details>
+
+<details>
+<summary><strong>Local OpenCode integration</strong></summary>
+
+TFM can use **OpenCode** in Termux as both an AI provider in the assistant and a dedicated full-UI tab. OpenCode requires the signed **bd-loser/opencode-bionic** apt package because the upstream glibc builds do not run natively in Termux; the in-app setup checks for a dpkg-owned installation before installing or replacing anything, and it requires **Android 10 or newer on an arm64 device**.
+
+The assistant talks to the local OpenCode HTTP/SSE API, so OpenCode keeps its own sessions, streaming, tools, permissions and model selection. The **OpenCode** tab embeds the official web UI and pairs with `opencode service` through a one-time sign-in link. Cleartext traffic is permitted only for loopback (`127.0.0.1` and `localhost`). With automatic execution enabled, tool permission prompts are approved once; otherwise they are rejected in the assistant and can be approved in the full OpenCode tab.
 
 </details>
 

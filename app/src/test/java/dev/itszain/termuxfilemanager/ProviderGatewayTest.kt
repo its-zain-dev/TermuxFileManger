@@ -108,7 +108,7 @@ class ProviderGatewayTest {
         assertTrue(job.isCancelled)
     }
     @Test fun allExistingProviderIdsRemainSupported() {
-        assertEquals(setOf("chatgpt","gemini","anthropic","openai","openrouter","groq","mistral","cohere","deepseek","xai","together"), AiProvider.all().map { it.id }.toSet())
+        assertEquals(setOf("chatgpt","gemini","anthropic","openai","openrouter","groq","mistral","cohere","deepseek","xai","together","opencode"), AiProvider.all().map { it.id }.toSet())
     }
     @Test fun chatGptNativeToolOnlyResponseIsNotAnEmptyResponse() = runBlocking {
         val final = "{\"response\":{\"status\":\"completed\",\"output\":[{\"type\":\"function_call\",\"namespace\":\"termux\",\"name\":\"app_info\",\"call_id\":\"call-1\",\"arguments\":\"{}\"}]}}"

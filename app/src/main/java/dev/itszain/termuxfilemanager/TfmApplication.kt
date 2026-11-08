@@ -20,7 +20,8 @@ class AppGraph(val context: Context) {
     val commands = TermuxGateway(context, dao)
     val files = TermuxFileRepository(context, commands)
     val chatGpt = ChatGptAuth(context, scope) { agent.stopAll() }
-    val ai = ProviderGateway(context)
+    val openCode = OpenCodeManager(context, commands)
+    val ai = ProviderGateway(context, openCode = OpenCodeGateway(context, openCode))
     val agent by lazy { AgentController(this) }
     val ready = MutableStateFlow(false)
     val startupError = MutableStateFlow<String?>(null)

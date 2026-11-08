@@ -22,13 +22,13 @@ Every successful main-branch build publishes a **permanently signed Release APK*
 2. Download `Termux-File-Manager-v...-Android-...-signed.apk` and the adjacent `.sha256` file if you want to verify its checksum.
 3. Grant installation-from-this-source permission when Android prompts, install the APK, and launch the app.
 4. Install and open [Termux](https://termux.dev/) separately. In TFM, tap **Connect to Termux** and follow its setup instructions.
-5. Optionally configure an AI provider or supported ChatGPT sign-in from app Settings.
+5. Optionally configure an AI provider or supported ChatGPT sign-in from app Settings. The optional local OpenCode agent is installed from the **OpenCode** tab and requires Android 10+ on an arm64 device.
 
 To validate the checksum, place the APK and its `.sha256` file in one directory and run `sha256sum -c <the-apk-name>.sha256` in a terminal.
 
 ## What is included
 
-File manager, search, copying/moving/deleting files, favorites, code editor, Termux terminal integration, developer package tools, AI coding assistant with configurable model providers, and light/dark/AMOLED themes.
+File manager, search, copying/moving/deleting files, favorites, code editor, Termux terminal integration, developer package tools, AI coding assistant with configurable model providers **and an optional local OpenCode agent (assistant provider plus the full OpenCode web UI in a dedicated tab)**, and light/dark/AMOLED themes.
 
 **More:** [README](../README.md) · [Changelog](../CHANGELOG.md) · [Arabic guide](../دليل-الاستخدام-عربي.md) · [Android GitHub Actions](https://github.com/its-zain-dev/TermuxFileManger/actions/workflows/android.yml)
 

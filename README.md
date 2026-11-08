@@ -31,7 +31,7 @@
 
 </div>
 
-> **Termux File Manager (TFM)** is a native, open-source Android file manager built for people who work in Termux. Browse and edit files, run shell commands, manage programming tools and collaborate with an AI coding assistant, all from one app. No root required. **Version 0.5.0** introduces native ChatGPT tool calling and a searchable tools hub.
+> **Termux File Manager (TFM)** is a native, open-source Android file manager built for people who work in Termux. Browse and edit files, run shell commands, manage programming tools and collaborate with an AI coding assistant, all from one app. No root required. **Version 0.6.0** adds a local **OpenCode** integration — the OpenCode agent as an AI provider and the official OpenCode web UI in a dedicated tab. Version 0.5.0 introduced native ChatGPT tool calling and a searchable tools hub.
 
 ---
 
@@ -78,11 +78,18 @@
       Kotlin, Jetpack Compose and Material 3 with responsive phone/tablet navigation, English/Arabic UI and light, dark and AMOLED themes. RTL layout preserves readable left-to-right paths and code.
     </td>
   </tr>
+  <tr>
+    <td colspan="2" valign="top">
+      <img src="docs/assets/icon-terminal.svg" alt="OpenCode" width="30" />
+      <h3>Local OpenCode agent</h3>
+      The official OpenCode agent runs entirely inside Termux. A dedicated <strong>OpenCode</strong> tab embeds the official web UI in the app with its native sessions, tools and model catalog, while the AI assistant can talk to the same local service through its HTTP/SSE API. Installation from the signed Bionic apt package is optional, verified first, and requires Android 10+ on an arm64 device.
+    </td>
+  </tr>
 </table>
 
 ## Screenshots
 
-These **are real screenshots saved from the Android app** on 28 October 2026. They capture an **earlier AI Agent interface**, not the current v0.5.0 Compose interface. They are included as historical in-app references until updated captures are available; individual screens and controls may differ in the latest APK.
+These **are real screenshots saved from the Android app** on 28 October 2026. They capture an **earlier AI Agent interface**, not the current v0.6.0 Compose interface. They are included as historical in-app references until updated captures are available; individual screens and controls may differ in the latest APK.
 
 <table>
   <tr>
@@ -119,6 +126,7 @@ The published release includes the signed Android APK, its `.sha256` checksum, t
 | CPU architecture | Use the signed APK attached to the release; check release notes for build specifics |
 | Storage | Managed through Termux and Android permissions |
 | AI models | Optional; account, API key, provider availability and usage limits vary |
+| Local OpenCode (optional) | Android 10+ (API 29+) on an arm64 (aarch64) device; installed from the in-app OpenCode tab |
 | Updates | Must be signed with the **same permanent key** as your installed version |
 
 ### Install on Android
@@ -126,12 +134,12 @@ The published release includes the signed Android APK, its `.sha256` checksum, t
 <img src="docs/assets/install-flow.svg" alt="Animated four-stage installation diagram: get signed APK, install, connect Termux, use files and AI tools" width="100%" />
 
 1. Open the [latest signed release](https://github.com/its-zain-dev/TermuxFileManger/releases/latest) on your phone or tablet. Expand **Assets** if the list is collapsed.
-2. Download the file named like `Termux-File-Manager-v0.5.0-Android-signed.apk`. The name changes when a new version is published. Optionally download the matching `.apk.sha256` file.
+2. Download the file named like `Termux-File-Manager-v0.6.0-Android-signed.apk`. The name changes when a new version is published. Optionally download the matching `.apk.sha256` file.
 3. Open the downloaded APK with Android's package installer. If Android blocks installation, allow **Install unknown apps** for the browser or file manager you are using. Revoke this permission afterward if desired.
 4. Open Termux File Manager. If Termux is not installed, install it separately from an official source via [termux.dev](https://termux.dev/) and open Termux once.
 5. In TFM, choose **Connect to Termux** and grant the Android permission to **Run commands in Termux environment**. Copy and run the setup command shown by TFM inside Termux; it configures external app access and required tools.
 6. Restart Termux if the setup prompts you, return to TFM and select **Check connection**. File, terminal and developer operations can now use Termux with its own user permissions.
-7. For Android shared storage, run `termux-setup-storage` in Termux and approve the system permission. Configure an AI provider separately if you want assistant features.
+7. For Android shared storage, run `termux-setup-storage` in Termux and approve the system permission. Configure an AI provider from Settings if you want assistant features, or install the optional local OpenCode agent from the **OpenCode** tab.
 
 **Important:** TFM cannot browse another Android app's private files or bypass Termux/Android sandbox rules. The app does not ship a full Termux Linux environment or an embedded interactive terminal emulator.
 
@@ -140,10 +148,10 @@ The published release includes the signed Android APK, its `.sha256` checksum, t
 In a terminal with `sha256sum`, keep the APK and its matching checksum file in the same folder and run:
 
 ```sh
-sha256sum -c Termux-File-Manager-v0.5.0-Android-signed.apk.sha256
+sha256sum -c Termux-File-Manager-v0.6.0-Android-signed.apk.sha256
 ```
 
-Replace `v0.5.0` with your downloaded version. A valid match prints `OK`. A checksum detects a damaged or modified download; installation trust also depends on downloading from the official repository and verifying the Android signing identity.
+Replace `v0.6.0` with your downloaded version. A valid match prints `OK`. A checksum detects a damaged or modified download; installation trust also depends on downloading from the official repository and verifying the Android signing identity.
 
 ### Updating an existing installation
 
@@ -205,6 +213,7 @@ Existing Termux workspace files, including `~/.TFM-setting/Memory.md`, `instruct
 | **Termux not connected** | Open Termux once, grant TFM's command permission, run the setup command shown in TFM and restart Termux. |
 | **Shared folders not accessible** | Run `termux-setup-storage` in Termux and approve Android storage permission. Android private app folders remain restricted. |
 | **AI authentication or rate limit error** | Check selected provider, endpoint, API key or sign-in state, model availability, account quotas and provider error output. |
+| **OpenCode fails to start or pair** | Confirm the device is Android 10+ on arm64 and Termux is connected. Use **Restart** in the OpenCode tab, then **Reconnect** to create a new one-time sign-in link. Installation may take several minutes. |
 | **Terminal command still running** | Review the session's command status. Stopping the assistant does not guarantee cancellation of an already dispatched Termux process. |
 | **Release isn't available** | Look at [GitHub Actions](https://github.com/its-zain-dev/TermuxFileManger/actions/workflows/android.yml); publication requires a successful signed release build. |
 

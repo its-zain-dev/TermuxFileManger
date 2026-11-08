@@ -1,6 +1,6 @@
 # Privacy information — Termux File Manager
 
-*Applies to the open-source Android application. Last reviewed for source version 0.5.0. This document describes behavior visible in the published source; external providers set their own policies.*
+*Applies to the open-source Android application. Last reviewed for source version 0.6.0. This document describes behavior visible in the published source; external providers set their own policies.*
 
 ## Information processed by the application
 
@@ -11,6 +11,8 @@ TFM accesses files and executes commands through Termux only after the user gran
 The AI assistant is optional. When a user sends a request to an AI provider, TFM sends the request content, conversation context needed for the request, and explicitly selected attachments or tool results to the configured provider's HTTPS endpoint. The provider may receive these data and apply its own privacy, retention and billing policies. Supported providers include commercial services; users should review the provider terms before use.
 
 If the user chooses ChatGPT sign-in, authentication uses OpenAI's browser-based authorization service, and subsequent API requests use the authorized account and endpoint. Other AI provider connections may require a user-supplied API key. Network features such as web research, skill import, model discovery and HTTPS downloads contact external services only when those features are used.
+
+When the optional local OpenCode integration is enabled, the app and the OpenCode agent communicate only through the device's local loopback interface; the manifest permits cleartext traffic exclusively for `127.0.0.1` and `localhost`. OpenCode remains a user-controlled local service that keeps its sessions, tools and model configuration in Termux, and its own outbound calls to its configured model endpoints follow OpenCode's settings and policies. Its prompts stay on the device unless used to reach those model endpoints.
 
 ## Credentials, media and execution
 

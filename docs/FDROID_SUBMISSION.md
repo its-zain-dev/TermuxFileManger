@@ -25,7 +25,7 @@
 
 1. Merge this source change, inspect `LICENSE`, review copyrights of contributors and any copied assets.
 2. Build and test the app from the published tree, including offline/without AI account. Confirm no proprietary binary dependencies appear in the transitive dependency graph and no downloaded executables bypass user consent.
-3. **Create a new version and tagged commit AFTER these new metadata/license files are merged**, e.g. update the project to `versionName '0.5.1'`, `versionCode 7`, then tag that source commit `v0.5.1`. F-Droid builds a tag/commit, not an APK from GitHub Releases. Avoid reusing the existing `v0.5.0-build.24` tag: it points at earlier sources without this license.
+3. **Create a new version and tagged commit AFTER these new metadata/license files are merged**, e.g. update the project to `versionName '0.6.0'`, `versionCode 7`, and tag that source commit `v0.6.0`. F-Droid builds a tag/commit, not an APK from GitHub Releases. The release workflow publishes main-branch tags of the form `v0.6.0-build.<number>`; do not reuse the existing `v0.5.0-build.24` tag because it points at earlier sources without this license.
 4. Update the `fdroiddata-draft` template to match the actual newly tagged `versionName`, `versionCode` and commit/tag. Do not copy placeholder versions into fdroiddata.
 5. Capture **real current-version screenshots** from the actual app (phone and optional tablet). Add them as PNG/JPEG at `fastlane/metadata/android/en-US/images/phoneScreenshots/1.png` etc. Old screenshots from different versions were deliberately excluded.
 6. Confirm the `NonFreeNet` disclosure with maintainers. Note that cloud AI is optional and the file/terminal features are local.

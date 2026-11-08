@@ -1,11 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.6.0
 
 - Added a local **OpenCode (Termux)** AI provider that streams through the OpenCode HTTP/SSE API with persistent sessions, model defaults, image attachments and permission handling.
 - Added a fifth **OpenCode** tab with setup, package checks, install/update/restart controls, one-time pairing and the official web UI in a cookie-enabled WebView.
 - Added signed **bd-loser/opencode-bionic** apt repository installation after verifying whether a dpkg-owned OpenCode is already present; requires Android 10+ on arm64.
 - Scoped cleartext network access to loopback only for the local OpenCode service.
+- Incremented app version to 0.6.0 / versionCode 7.
 
 ## 0.5.0
 

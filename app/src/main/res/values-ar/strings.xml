@@ -323,6 +323,8 @@
     <string name="opencode_installing">جارٍ تثبيت OpenCode أو تحديثه. أبقِ Termux متاحًا ومتصلًا…</string>
     <string name="opencode_installed">OpenCode مثبّت</string>
     <string name="opencode_not_installed">OpenCode غير مثبّت</string>
+    <string name="opencode_checking">جارٍ التحقق من تثبيت OpenCode…</string>
+    <string name="opencode_loading">جارٍ تشغيل OpenCode…</string>
     <string name="opencode_not_supported">OpenCode غير مدعوم على هذا الجهاز</string>
     <string name="opencode_ready">OpenCode جاهز</string>
     <string name="opencode_open_ui">الواجهة الكاملة</string>

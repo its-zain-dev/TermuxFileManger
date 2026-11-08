@@ -323,6 +323,8 @@
     <string name="opencode_installing">Installing or updating OpenCode. Keep Termux available and connected…</string>
     <string name="opencode_installed">OpenCode is installed</string>
     <string name="opencode_not_installed">OpenCode is not installed</string>
+    <string name="opencode_checking">Checking OpenCode installation…</string>
+    <string name="opencode_loading">Starting OpenCode…</string>
     <string name="opencode_not_supported">OpenCode is not supported on this device</string>
     <string name="opencode_ready">OpenCode is ready</string>
     <string name="opencode_open_ui">Full UI</string>

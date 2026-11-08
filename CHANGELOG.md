@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.1
+
+- Fixed the OpenCode tab showing "Install OpenCode" again after every app restart; the verified install state (version, compatibility) is now persisted and restored instantly, and transient Termux slow-downs or errors no longer wipe a known-good install status.
+- Fixed the long black/blank first open: the OpenCode WebView loads immediately from the persisted service URL and password, with a lightweight progress overlay instead of an empty black view, and the WebView is no longer recreated when status updates.
+- Made the OpenCode tab dramatically faster and lighter: status and service/connection checks are batched into single shell round trips, install/update no longer block all other OpenCode operations (separate locks), verification is debounced, and connections are cached for 15 minutes and persisted so repeated sends cost no shell calls at all.
+- Made the OpenCode tab fully immersive on phones and tablets: removed the app bar, bottom navigation/rail and the in-screen header and action rows, so the OpenCode UI now uses the entire screen (navigate away with system back).
+- Fixed silent dismissal of OpenCode check errors; they now surface as a message dialog.
+
 ## 0.6.0
 
 - Added a local **OpenCode (Termux)** AI provider that streams through the OpenCode HTTP/SSE API with persistent sessions, model defaults, image attachments and permission handling.

@@ -2,6 +2,7 @@ package dev.itszain.termuxfilemanager.ui
 
 import android.annotation.SuppressLint
 import android.content.Intent
+import android.graphics.Color
 import android.net.Uri
 import android.view.ViewGroup
 import android.webkit.CookieManager
@@ -15,7 +16,7 @@ import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -36,16 +37,15 @@ import dev.itszain.termuxfilemanager.AppGraph
 import dev.itszain.termuxfilemanager.R
 import dev.itszain.termuxfilemanager.data.OpenCodeStatus
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 /**
- * Full OpenCode experience: setup and package checks, then the official server web UI
- * inside a WebView with cookies, JavaScript, file uploads and external-link handling.
+ * Full-screen OpenCode experience: setup checks, then the official server web UI inside a
+ * WebView. No headers or tab bars — the WebView takes the whole screen while the service
+ * starts, a lightweight overlay replaces the old blank/black first-paint gap.
  */
 @SuppressLint("SetJavaScriptEnabled")
-@Composable fun OpenCodeScreen(graph: AppGraph, openTerminal: (String, String) -> Unit) {
+@Composable fun OpenCodeScreen(graph: AppGraph) {
     val status by graph.openCode.status.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -53,6 +53,7 @@ import kotlinx.coroutines.withContext
     var message by remember { mutableStateOf<String?>(null) }
     var loaded by remember { mutableStateOf(false) }
     var canGoBack by remember { mutableStateOf(false) }
+    var pageReady by remember { mutableStateOf(false) }
     var pendingFile by remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         val callback = pendingFile
@@ -66,9 +67,11 @@ import kotlinx.coroutines.withContext
         runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, uri)) }
         return true
     }
-    val web = remember(status.installed) {
+    // Created once; recreating it on status flips used to lose page state and flash.
+    val web = remember {
         WebView(context).apply {
             layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+            setBackgroundColor(Color.WHITE)
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             settings.databaseEnabled = true
@@ -102,13 +105,14 @@ import kotlinx.coroutines.withContext
                 override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean = external(url)
                 override fun onPageFinished(view: WebView?, url: String?) {
                     canGoBack = view?.canGoBack() == true
+                    pageReady = true
                     CookieManager.getInstance().flush()
                 }
                 override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) {
                     canGoBack = view?.canGoBack() == true
                 }
                 override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
-                    if (request?.isForMainFrame == true) message = "opencode_start_failed"
+                    if (request?.isForMainFrame == true) { pageReady = true; message = "opencode_start_failed" }
                 }
             }
         }
@@ -118,18 +122,34 @@ import kotlinx.coroutines.withContext
             runCatching { web.stopLoading(); (web.parent as? ViewGroup)?.removeView(web); web.destroy() }
         }
     }
+    fun load(url: String) {
+        pageReady = false
+        web.loadUrl(url)
+    }
     fun connect(forcePair: Boolean = false) {
         if (busy) return
         busy = true
         scope.launch {
             try {
-                val connection = graph.openCode.connection()
-                val target = if (forcePair || !graph.openCode.pairedRecently()) graph.openCode.pairUrl() else connection.url
-                withContext(Dispatchers.Main) { web.loadUrl(target) }
+                // First attempt uses cached/persisted connection data (instant); a failed or
+                // stale one falls back to a forced, fully verified connection via Termux.
+                var target: String? = null
+                var failure: Exception? = null
+                for (attempt in 0..1) {
+                    try {
+                        val connection = graph.openCode.connection(force = attempt == 1)
+                        target = if (forcePair || !graph.openCode.pairedRecently()) graph.openCode.pairUrl() else connection.url
+                        break
+                    } catch (cancelled: CancellationException) { throw cancelled }
+                    catch (error: Exception) { failure = error }
+                }
+                val url = target ?: throw (failure ?: IllegalStateException("opencode_start_failed"))
+                load(url)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
                 message = error.message ?: "opencode_start_failed"
+                pageReady = true
             } finally {
                 busy = false
             }
@@ -155,78 +175,53 @@ import kotlinx.coroutines.withContext
             finally { busy = false }
         }
     }
-    fun restart() {
-        if (busy) return
-        busy = true
-        scope.launch {
-            try {
-                graph.openCode.restart()
-                val connection = graph.openCode.connection(force = true)
-                withContext(Dispatchers.Main) { web.loadUrl(connection.url) }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Exception) {
-                message = error.message ?: "opencode_start_failed"
-            } finally {
-                busy = false
-            }
+    // A silent failure used to leave the old "Install" screen forever; surface it instead.
+    LaunchedEffect(Unit) {
+        if (!status.checked) {
+            try { graph.openCode.refresh() } catch (cancelled: CancellationException) { throw cancelled }
+            catch (error: Exception) { message = error.message }
         }
     }
-    LaunchedEffect(Unit) {
-        if (!status.checked) runCatching { graph.openCode.refresh() }
-    }
-    LaunchedEffect(status.installed) {
-        if (status.installed && !loaded) {
+    LaunchedEffect(status.installed, status.compatible) {
+        if (status.installed && status.compatible && !loaded) {
             loaded = true
             connect()
         }
     }
     BackHandler(enabled = canGoBack) { web.goBack() }
-    Column(Modifier.fillMaxSize()) {
-        Surface(tonalElevation = 2.dp) {
-            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Outlined.Extension, null)
-                    Spacer(Modifier.width(10.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(stringResource(R.string.opencode), style = MaterialTheme.typography.titleMedium)
-                        Text(
-                            when {
-                                !status.supported -> stringResource(R.string.opencode_not_supported)
-                                !status.installed -> stringResource(R.string.opencode_not_installed)
-                                else -> status.version.ifBlank { stringResource(R.string.opencode_installed) }
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (status.supported) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error
-                        )
-                    }
-                    if (busy) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
-                }
-                if (status.installed) {
-                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                        TextButton(onClick = { connect(true) }) { Text(stringResource(R.string.opencode_reconnect)) }
-                        TextButton(enabled = !busy, onClick = { restart() }) { Text(stringResource(R.string.opencode_restart)) }
-                        TextButton(enabled = !busy, onClick = { upgrade() }) { Text(stringResource(R.string.opencode_update)) }
-                        TextButton(onClick = { openTerminal("~/", "opencode") }) { Text(stringResource(R.string.opencode_tui)) }
-                        TextButton(onClick = {
-                            val url = status.url.ifBlank { graph.openCode.storedUrl() }
-                            if (url.isNotBlank()) runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
-                        }) { Text(stringResource(R.string.opencode_open_browser)) }
-                    }
-                }
-            }
-        }
-        if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-        when {
-            !status.supported -> EmptyPane(stringResource(R.string.opencode), supportText(status.supportReason), Icons.Outlined.Extension)
-            !status.installed || !status.compatible -> OpenCodeSetup(status, busy, ::install, ::upgrade)
-            else -> AndroidView(factory = { web }, modifier = Modifier.fillMaxSize().weight(1f))
+    when {
+        !status.supported -> EmptyPane(stringResource(R.string.opencode), supportText(status.supportReason), Icons.Outlined.Extension)
+        !status.checked -> LoadingPane(stringResource(R.string.opencode_checking))
+        !status.installed || !status.compatible -> OpenCodeSetup(status, busy, ::install, ::upgrade)
+        else -> Box(Modifier.fillMaxSize()) {
+            AndroidView(factory = { web }, modifier = Modifier.fillMaxSize())
+            if (!pageReady) LoadingOverlay()
         }
     }
     message?.let { text ->
         AlertDialog(onDismissRequest = { message = null }, title = { Text(stringResource(R.string.opencode)) },
             text = { Text(errorText(text)) },
             confirmButton = { TextButton(onClick = { message = null }) { Text(stringResource(R.string.close)) } })
+    }
+}
+
+@Composable private fun LoadingPane(label: String) {
+    Column(Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center) {
+        CircularProgressIndicator()
+        Spacer(Modifier.height(14.dp))
+        Text(label, textAlign = TextAlign.Center, style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable private fun LoadingOverlay() {
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
+        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+        CircularProgressIndicator()
+        Spacer(Modifier.height(14.dp))
+        Text(stringResource(R.string.opencode_loading), textAlign = TextAlign.Center, style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 

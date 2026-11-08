@@ -91,6 +91,8 @@ private inline fun <reified T : ViewModel> factory(crossinline create: () -> T) 
                     val title = destinations.firstOrNull { it.first == route }?.second ?: when { route.startsWith("editor") -> R.string.editor; route == "setup" -> R.string.connect_termux; else -> R.string.settings }
                     val root = destinations.any { it.first == route }
                     fun go(destination: String) { nav.navigate(destination) { popUpTo("files") { saveState = true }; launchSingleTop = true; restoreState = true } }
+                    // The OpenCode tab is fully immersive: no app bar, no navigation bar, no rail.
+                    val fullscreen = route == "opencode"
                     fun openTerminal(path: String, command: String) { incomingPath = path; incomingCommand = command; go("terminal") }
                     LaunchedEffect(request) {
                         request?.let {
@@ -102,20 +104,22 @@ private inline fun <reified T : ViewModel> factory(crossinline create: () -> T) 
                     }
                     BoxWithConstraints(Modifier.fillMaxSize()) {
                         val rail = maxWidth >= 600.dp
-                        Scaffold(modifier = Modifier.fillMaxSize(), topBar = {
-                            TopAppBar(title = { Column { Text(stringResource(title)); if(root) Text("TERMUX FILE MANAGER", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) } },
-                                navigationIcon = { if(!root) IconButton(onClick = { if(route.startsWith("editor")) editorExit = true else nav.popBackStack() }) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.close)) } },
-                                actions = { if(root) { IconButton(onClick = { nav.navigate("setup") }) { Icon(Icons.Outlined.Link, stringResource(R.string.connect_termux)) }; IconButton(onClick = { nav.navigate("settings") }) { Icon(Icons.Outlined.Settings, stringResource(R.string.settings)) } } })
-                        }, bottomBar = {
-                            if(!rail && root && !WindowInsets.isImeVisible) NavigationBar { destinations.forEachIndexed { index, (destination, label) -> NavigationBarItem(selected = route == destination, onClick = { go(destination) }, icon = { Icon(icons[index], null) }, label = { Text(stringResource(label)) }) } }
-                        }) { padding ->
+                        Scaffold(modifier = Modifier.fillMaxSize(),
+                            contentWindowInsets = if (fullscreen) WindowInsets(0, 0, 0, 0) else ScaffoldDefaults.contentWindowInsets,
+                            topBar = {
+                                if (!fullscreen) TopAppBar(title = { Column { Text(stringResource(title)); if(root) Text("TERMUX FILE MANAGER", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) } },
+                                    navigationIcon = { if(!root) IconButton(onClick = { if(route.startsWith("editor")) editorExit = true else nav.popBackStack() }) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.close)) } },
+                                    actions = { if(root) { IconButton(onClick = { nav.navigate("setup") }) { Icon(Icons.Outlined.Link, stringResource(R.string.connect_termux)) }; IconButton(onClick = { nav.navigate("settings") }) { Icon(Icons.Outlined.Settings, stringResource(R.string.settings)) } } })
+                            }, bottomBar = {
+                                if(!fullscreen && !rail && root && !WindowInsets.isImeVisible) NavigationBar { destinations.forEachIndexed { index, (destination, label) -> NavigationBarItem(selected = route == destination, onClick = { go(destination) }, icon = { Icon(icons[index], null) }, label = { Text(stringResource(label)) }) } }
+                            }) { padding ->
                             Row(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()) {
-                                if(rail && root) NavigationRail { Spacer(Modifier.height(16.dp)); destinations.forEachIndexed { index, (destination, label) -> NavigationRailItem(selected = route == destination, onClick = { go(destination) }, icon = { Icon(icons[index], null) }, label = { Text(stringResource(label)) }); Spacer(Modifier.height(12.dp)) } }
+                                if(rail && root && !fullscreen) NavigationRail { Spacer(Modifier.height(16.dp)); destinations.forEachIndexed { index, (destination, label) -> NavigationRailItem(selected = route == destination, onClick = { go(destination) }, icon = { Icon(icons[index], null) }, label = { Text(stringResource(label)) }); Spacer(Modifier.height(12.dp)) } }
                                 NavHost(navController = nav, startDestination = "files", modifier = Modifier.weight(1f).fillMaxHeight()) {
                                     composable("files") { FilesScreen(files, { nav.navigate("editor/${Uri.encode(it)}") }, ::openTerminal, { nav.navigate("setup") }) }
                                     composable("terminal") { TerminalScreen(workspace, incomingPath, incomingCommand) { incomingPath = ""; incomingCommand = "" } }
                                     composable("assistant") { AssistantScreen(workspace, { nav.navigate("settings") }, ::openTerminal, { go("opencode") }) }
-                                    composable("opencode") { OpenCodeScreen(graph) { path, command -> openTerminal(path, command) } }
+                                    composable("opencode") { OpenCodeScreen(graph) }
                                     composable("tools") { ToolsScreen(workspace) { workspace.suggestedPrompt.value = it; go("assistant") } }
                                     composable("settings") { SettingsScreen(graph, { nav.navigate("setup") }, { go("opencode") }) }
                                     composable("setup") { SetupScreen(graph) { files.refresh() } }

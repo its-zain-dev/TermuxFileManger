@@ -29,7 +29,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.NavType
 import androidx.navigation.compose.*
+import androidx.navigation.navArgument
 import dev.itszain.termuxfilemanager.data.AppSettings
 import dev.itszain.termuxfilemanager.features.*
 import dev.itszain.termuxfilemanager.ui.*
@@ -40,40 +42,72 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        request = if(savedInstanceState == null) intent else null
+        request = if (savedInstanceState == null) intent else null
         setContent { TfmApp(graph(), request) { request = null } }
     }
-    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); request = intent }
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        request = intent
+    }
 }
+
 private inline fun <reified T : ViewModel> factory(crossinline create: () -> T) = object : ViewModelProvider.Factory {
-    @Suppress("UNCHECKED_CAST") override fun <V : ViewModel> create(modelClass: Class<V>): V = create() as V
+    @Suppress("UNCHECKED_CAST")
+    override fun <V : ViewModel> create(modelClass: Class<V>): V = create() as V
 }
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
-@Composable fun TfmApp(graph: AppGraph, request: Intent? = null, consumed: () -> Unit = {}) {
+@Composable
+fun TfmApp(graph: AppGraph, request: Intent? = null, consumed: () -> Unit = {}) {
     val appearance by graph.settings.appearance.collectAsStateWithLifecycle(AppSettings())
     val ready by graph.ready.collectAsStateWithLifecycle()
     val startupError by graph.startupError.collectAsStateWithLifecycle()
     val originalContext = LocalContext.current
     val originalConfiguration = LocalConfiguration.current
+
     val localized = remember(appearance.language, originalConfiguration) {
         val config = Configuration(originalConfiguration)
-        if(appearance.language != "system") { val locale = Locale.forLanguageTag(appearance.language); config.setLocale(locale); config.setLayoutDirection(locale) }
+        if (appearance.language != "system") {
+            val locale = Locale.forLanguageTag(appearance.language)
+            config.setLocale(locale)
+            config.setLayoutDirection(locale)
+        }
         // Preserve the Activity in the context chain for result launchers and browser intents.
         ContextThemeWrapper(originalContext, R.style.AppTheme).apply { applyOverrideConfiguration(config) }
     }
     val rtl = localized.resources.configuration.layoutDirection == android.view.View.LAYOUT_DIRECTION_RTL
-    CompositionLocalProvider(LocalContext provides localized, LocalConfiguration provides localized.resources.configuration,
-        LocalLayoutDirection provides if(rtl) LayoutDirection.Rtl else LayoutDirection.Ltr) {
-        TfmTheme(appearance.theme) {
+
+    CompositionLocalProvider(
+        LocalContext provides localized,
+        LocalConfiguration provides localized.resources.configuration,
+        LocalLayoutDirection provides if (rtl) LayoutDirection.Rtl else LayoutDirection.Ltr
+    ) {
+        TfmTheme(appearance.theme, appearance.dynamicColor) {
             val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
-            SideEffect { (originalContext as? ComponentActivity)?.let { WindowCompat.getInsetsController(it.window, it.window.decorView).apply { isAppearanceLightStatusBars = !dark; isAppearanceLightNavigationBars = !dark } } }
+            SideEffect {
+                (originalContext as? ComponentActivity)?.let {
+                    WindowCompat.getInsetsController(it.window, it.window.decorView).apply {
+                        isAppearanceLightStatusBars = !dark
+                        isAppearanceLightNavigationBars = !dark
+                    }
+                }
+            }
             Surface(Modifier.fillMaxSize()) {
-                if(!ready) {
-                    Column(Modifier.fillMaxSize().safeDrawingPadding().padding(24.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-                        if(startupError != null) {
+                if (!ready) {
+                    Column(
+                        Modifier.fillMaxSize().safeDrawingPadding().padding(24.dp),
+                        verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        if (startupError != null) {
                             Text(stringResource(R.string.startup_error), style = MaterialTheme.typography.headlineSmall)
-                            Text(stringResource(R.string.startup_error_body)); Spacer(Modifier.height(16.dp)); ErrorNotice(startupError!!) { graph.startupError.value = null; graph.initialize() }
-                        } else CircularProgressIndicator()
+                            Text(stringResource(R.string.startup_error_body))
+                            Spacer(Modifier.height(16.dp))
+                            ErrorNotice(startupError!!) { graph.startupError.value = null; graph.initialize() }
+                        } else {
+                            CircularProgressIndicator()
+                        }
                     }
                 } else {
                     val files: FilesModel = viewModel(factory = factory { FilesModel(graph) })
@@ -86,49 +120,189 @@ private inline fun <reified T : ViewModel> factory(crossinline create: () -> T) 
                     var incomingCommand by rememberSaveable { mutableStateOf("") }
                     var editorExit by remember { mutableStateOf(false) }
                     val error by workspace.error.collectAsStateWithLifecycle()
-                    val destinations = listOf("files" to R.string.files, "terminal" to R.string.terminal, "assistant" to R.string.assistant, "opencode" to R.string.opencode, "tools" to R.string.tools)
-                    val icons = listOf(Icons.Outlined.FolderOpen, Icons.Outlined.Terminal, Icons.Outlined.AutoAwesome, Icons.Outlined.Extension, Icons.Outlined.Widgets)
-                    val title = destinations.firstOrNull { it.first == route }?.second ?: when { route.startsWith("editor") -> R.string.editor; route == "setup" -> R.string.connect_termux; else -> R.string.settings }
+                    val activeAgents by graph.agent.active.collectAsStateWithLifecycle()
+                    val pendingApprovals by graph.agent.pending.collectAsStateWithLifecycle()
+                    val openCodeStatus by graph.openCode.status.collectAsStateWithLifecycle()
+
+                    val destinations = listOf(
+                        "files" to R.string.files,
+                        "terminal" to R.string.terminal,
+                        "assistant" to R.string.assistant,
+                        "opencode" to R.string.opencode,
+                        "tools" to R.string.tools
+                    )
+                    val icons = listOf(
+                        Icons.Outlined.FolderOpen,
+                        Icons.Outlined.Terminal,
+                        Icons.Outlined.AutoAwesome,
+                        Icons.Outlined.Extension,
+                        Icons.Outlined.Widgets
+                    )
+                    val title = destinations.firstOrNull { it.first == route }?.second ?: when {
+                        route.startsWith("editor") -> R.string.editor
+                        route == "setup" -> R.string.connect_termux
+                        else -> R.string.settings
+                    }
                     val root = destinations.any { it.first == route }
-                    fun go(destination: String) { nav.navigate(destination) { popUpTo("files") { saveState = true }; launchSingleTop = true; restoreState = true } }
-                    // The OpenCode tab is fully immersive: no app bar, no navigation bar, no rail.
+                    fun go(destination: String) {
+                        nav.navigate(destination) {
+                            popUpTo("files") { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    }
                     val fullscreen = route == "opencode"
-                    fun openTerminal(path: String, command: String) { incomingPath = path; incomingCommand = command; go("terminal") }
+                    fun openTerminal(path: String, command: String) {
+                        incomingPath = path
+                        incomingCommand = command
+                        go("terminal")
+                    }
+                    fun openEditor(path: String, line: Int = 1) {
+                        nav.navigate("editor?path=${Uri.encode(path)}&line=$line")
+                    }
+                    fun askAi(prompt: String) {
+                        workspace.suggestedPrompt.value = prompt
+                        go("assistant")
+                    }
+
                     LaunchedEffect(request) {
                         request?.let {
                             val shared = it.getStringExtra("shared_command").orEmpty()
-                            if(shared.isNotBlank()) openTerminal("~/", shared)
-                            else if(it.getStringExtra("route") == "assistant") go("assistant")
+                            val targetRoute = it.getStringExtra("route").orEmpty()
+                            if (shared.isNotBlank()) openTerminal("~/", shared)
+                            else if (targetRoute in setOf("files", "terminal", "assistant", "opencode", "tools")) go(targetRoute)
                             consumed()
                         }
                     }
+
+                    @Composable
+                    fun NavBadgeIcon(destination: String, icon: androidx.compose.ui.graphics.vector.ImageVector) {
+                        val showBadge = (destination == "assistant" && (activeAgents.isNotEmpty() || pendingApprovals.isNotEmpty())) ||
+                            (destination == "opencode" && openCodeStatus.running)
+                        BadgedBox(badge = {
+                            if (showBadge) {
+                                Badge(
+                                    containerColor = if (destination == "assistant" && pendingApprovals.isNotEmpty())
+                                        LocalTfmColors.current.warning else MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }) { Icon(icon, null) }
+                    }
+
                     BoxWithConstraints(Modifier.fillMaxSize()) {
                         val rail = maxWidth >= 600.dp
-                        Scaffold(modifier = Modifier.fillMaxSize(),
+                        Scaffold(
+                            modifier = Modifier.fillMaxSize(),
                             contentWindowInsets = if (fullscreen) WindowInsets(0, 0, 0, 0) else ScaffoldDefaults.contentWindowInsets,
                             topBar = {
-                                if (!fullscreen) TopAppBar(title = { Column { Text(stringResource(title)); if(root) Text("TERMUX FILE MANAGER", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) } },
-                                    navigationIcon = { if(!root) IconButton(onClick = { if(route.startsWith("editor")) editorExit = true else nav.popBackStack() }) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.close)) } },
-                                    actions = { if(root) { IconButton(onClick = { nav.navigate("setup") }) { Icon(Icons.Outlined.Link, stringResource(R.string.connect_termux)) }; IconButton(onClick = { nav.navigate("settings") }) { Icon(Icons.Outlined.Settings, stringResource(R.string.settings)) } } })
-                            }, bottomBar = {
-                                if(!fullscreen && !rail && root && !WindowInsets.isImeVisible) NavigationBar { destinations.forEachIndexed { index, (destination, label) -> NavigationBarItem(selected = route == destination, onClick = { go(destination) }, icon = { Icon(icons[index], null) }, label = { Text(stringResource(label)) }) } }
-                            }) { padding ->
+                                if (!fullscreen) TopAppBar(
+                                    title = {
+                                        Column {
+                                            Text(stringResource(title))
+                                            if (root) Text(
+                                                "TERMUX FILE MANAGER",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    },
+                                    navigationIcon = {
+                                        if (!root) IconButton(onClick = { if (route.startsWith("editor")) editorExit = true else nav.popBackStack() }) {
+                                            Icon(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.close))
+                                        }
+                                    },
+                                    actions = {
+                                        if (root) {
+                                            IconButton(onClick = { nav.navigate("setup") }) { Icon(Icons.Outlined.Link, stringResource(R.string.connect_termux)) }
+                                            IconButton(onClick = { nav.navigate("settings") }) { Icon(Icons.Outlined.Settings, stringResource(R.string.settings)) }
+                                        }
+                                    }
+                                )
+                            },
+                            bottomBar = {
+                                if (!fullscreen && !rail && root && !WindowInsets.isImeVisible) {
+                                    NavigationBar {
+                                        destinations.forEachIndexed { index, (destination, label) ->
+                                            NavigationBarItem(
+                                                selected = route == destination,
+                                                onClick = { go(destination) },
+                                                icon = { NavBadgeIcon(destination, icons[index]) },
+                                                label = { Text(stringResource(label), maxLines = 1) }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        ) { padding ->
                             Row(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()) {
-                                if(rail && root && !fullscreen) NavigationRail { Spacer(Modifier.height(16.dp)); destinations.forEachIndexed { index, (destination, label) -> NavigationRailItem(selected = route == destination, onClick = { go(destination) }, icon = { Icon(icons[index], null) }, label = { Text(stringResource(label)) }); Spacer(Modifier.height(12.dp)) } }
+                                if (rail && root && !fullscreen) {
+                                    NavigationRail {
+                                        Spacer(Modifier.height(16.dp))
+                                        destinations.forEachIndexed { index, (destination, label) ->
+                                            NavigationRailItem(
+                                                selected = route == destination,
+                                                onClick = { go(destination) },
+                                                icon = { NavBadgeIcon(destination, icons[index]) },
+                                                label = { Text(stringResource(label)) }
+                                            )
+                                            Spacer(Modifier.height(10.dp))
+                                        }
+                                    }
+                                }
                                 NavHost(navController = nav, startDestination = "files", modifier = Modifier.weight(1f).fillMaxHeight()) {
-                                    composable("files") { FilesScreen(files, { nav.navigate("editor/${Uri.encode(it)}") }, ::openTerminal, { nav.navigate("setup") }) }
-                                    composable("terminal") { TerminalScreen(workspace, incomingPath, incomingCommand) { incomingPath = ""; incomingCommand = "" } }
-                                    composable("assistant") { AssistantScreen(workspace, { nav.navigate("settings") }, ::openTerminal, { go("opencode") }) }
-                                    composable("opencode") { OpenCodeScreen(graph) }
-                                    composable("tools") { ToolsScreen(workspace) { workspace.suggestedPrompt.value = it; go("assistant") } }
-                                    composable("settings") { SettingsScreen(graph, { nav.navigate("setup") }, { go("opencode") }) }
-                                    composable("setup") { SetupScreen(graph) { files.refresh() } }
-                                    composable("editor/{path}") { back -> EditorScreen(editor, back.arguments?.getString("path").orEmpty(), editorExit, { editorExit = false }) { nav.popBackStack(); files.refresh() } }
+                                    composable("files") {
+                                        FilesScreen(files, ::openEditor, ::openTerminal, ::askAi) { nav.navigate("setup") }
+                                    }
+                                    composable("terminal") {
+                                        TerminalScreen(workspace, incomingPath, incomingCommand, ::askAi) { incomingPath = ""; incomingCommand = "" }
+                                    }
+                                    composable("assistant") {
+                                        AssistantScreen(workspace, { nav.navigate("settings") }, ::openTerminal) { go("opencode") }
+                                    }
+                                    composable("opencode") {
+                                        OpenCodeScreen(graph) { go("files") }
+                                    }
+                                    composable("tools") {
+                                        ToolsScreen(workspace, ::askAi)
+                                    }
+                                    composable("settings") {
+                                        SettingsScreen(graph, { nav.navigate("setup") }) { go("opencode") }
+                                    }
+                                    composable("setup") {
+                                        SetupScreen(graph) { files.refresh() }
+                                    }
+                                    composable(
+                                        route = "editor?path={path}&line={line}",
+                                        arguments = listOf(
+                                            navArgument("path") { type = NavType.StringType; defaultValue = "" },
+                                            navArgument("line") { type = NavType.IntType; defaultValue = 1 }
+                                        )
+                                    ) { back ->
+                                        EditorScreen(
+                                            model = editor,
+                                            path = back.arguments?.getString("path").orEmpty(),
+                                            initialLine = back.arguments?.getInt("line") ?: 1,
+                                            requestExit = editorExit,
+                                            resetExit = { editorExit = false },
+                                            openTerminal = ::openTerminal
+                                        ) {
+                                            nav.popBackStack()
+                                            files.refresh()
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
-                    error?.let { AlertDialog(onDismissRequest = { workspace.error.value = null }, title = { Text(stringResource(R.string.error_title)) }, text = { Text(errorText(it)) }, confirmButton = { TextButton(onClick = { workspace.error.value = null }) { Text(stringResource(R.string.close)) } }) }
+
+                    error?.let {
+                        AlertDialog(
+                            onDismissRequest = { workspace.error.value = null },
+                            title = { Text(stringResource(R.string.error_title)) },
+                            text = { Text(errorText(it)) },
+                            confirmButton = { TextButton(onClick = { workspace.error.value = null }) { Text(stringResource(R.string.close)) } }
+                        )
+                    }
                 }
             }
         }

@@ -24,10 +24,17 @@ jobs:
           distribution: temurin
           java-version: '17'
       - uses: gradle/actions/setup-gradle@v6
-      - name: Test bridge
-        run: python3 -m unittest discover -s tests -v
+      - name: Test bridge & F-Droid compliance
+        run: |
+          python3 -m unittest discover -s tests -v
+          python3 scripts/check_fdroid.py
       - name: Test, lint and assemble Release (validation only)
         run: ./gradlew --no-daemon testReleaseUnitTest lintRelease assembleRelease
+      - name: Verify Release APK F-Droid reproducibility compliance
+        run: |
+          APK="$(ls app/build/outputs/apk/release/app-release*.apk | head -n 1)"
+          test -s "$APK"
+          python3 scripts/check_fdroid.py --apk "$APK"
 
   release-build:
     name: Build and publish signed Android Release APK
@@ -71,8 +78,10 @@ jobs:
           echo "TFM_RELEASE_KEYSTORE_PATH=$KEYSTORE_PATH" >> "$GITHUB_ENV"
           echo 'Permanent release signing identity verified.'
 
-      - name: Test Termux file protocol
-        run: python3 -m unittest discover -s tests -v
+      - name: Test Termux file protocol & F-Droid compliance
+        run: |
+          python3 -m unittest discover -s tests -v
+          python3 scripts/check_fdroid.py
 
       - name: Test, lint and build Release
         env:
@@ -88,12 +97,13 @@ jobs:
           name: validation-reports
           path: app/build/reports/
 
-      - name: Verify signed APK
+      - name: Verify signed APK & F-Droid blocks
         shell: bash
         run: |
           set -euo pipefail
           APK=app/build/outputs/apk/release/app-release.apk
           test -s "$APK"
+          python3 scripts/check_fdroid.py --apk "$APK"
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -maxdepth 2 -type f -name apksigner | sort -V | tail -n 1)"
           test -n "$APKSIGNER"
           "$APKSIGNER" verify --verbose --print-certs "$APK"

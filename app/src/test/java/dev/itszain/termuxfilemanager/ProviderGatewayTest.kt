@@ -108,7 +108,15 @@ class ProviderGatewayTest {
         assertTrue(job.isCancelled)
     }
     @Test fun allExistingProviderIdsRemainSupported() {
-        assertEquals(setOf("chatgpt","gemini","anthropic","openai","openrouter","groq","mistral","cohere","deepseek","xai","together","opencode"), AiProvider.all().map { it.id }.toSet())
+        assertEquals(setOf("chatgpt","gemini","anthropic","openai","openrouter","groq","mistral","cohere","deepseek","xai","together","ollama","opencode"), AiProvider.all().map { it.id }.toSet())
+    }
+    @Test fun endpointPolicyAllowsLoopbackHttpAndEnforcesHttpsRemotely() {
+        assertTrue(AiProvider.isAllowedEndpoint("https://api.openai.com/v1/chat/completions"))
+        assertTrue(AiProvider.isAllowedEndpoint("http://127.0.0.1:11434/v1/chat/completions"))
+        assertTrue(AiProvider.isAllowedEndpoint("http://localhost:8080/v1/chat/completions"))
+        assertFalse(AiProvider.isAllowedEndpoint("http://example.com/v1/chat/completions"))
+        assertFalse(AiProvider.isAllowedEndpoint("http://192.168.1.5:11434/v1/chat/completions"))
+        assertFalse(AiProvider.isLoopbackEndpoint("https://127.0.0.1.evil.com/v1"))
     }
     @Test fun chatGptNativeToolOnlyResponseIsNotAnEmptyResponse() = runBlocking {
         val final = "{\"response\":{\"status\":\"completed\",\"output\":[{\"type\":\"function_call\",\"namespace\":\"termux\",\"name\":\"app_info\",\"call_id\":\"call-1\",\"arguments\":\"{}\"}]}}"

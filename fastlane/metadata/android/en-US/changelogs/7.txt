@@ -1,0 +1,1 @@
+Version 0.6.0: Added optional local OpenCode (Termux) AI provider with SSE streaming, persistent sessions, and a dedicated in-app OpenCode web UI tab using loopback-only cleartext network rules.

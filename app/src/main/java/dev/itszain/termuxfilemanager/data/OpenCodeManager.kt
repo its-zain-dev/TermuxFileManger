@@ -3,6 +3,8 @@ package dev.itszain.termuxfilemanager.data
 import android.content.Context
 import android.os.Build
 import dev.itszain.termuxfilemanager.AiSecureStore
+import dev.itszain.termuxfilemanager.BackgroundWorkCoordinator
+import dev.itszain.termuxfilemanager.R
 import dev.itszain.termuxfilemanager.core.CommandResult
 import dev.itszain.termuxfilemanager.core.CommandSpec
 import kotlinx.coroutines.CoroutineScope
@@ -33,19 +35,18 @@ data class OpenCodeStatus(
 data class OpenCodeConnection(val url: String, val password: String)
 
 /**
- * Owns the Termux side of OpenCode: the signed Bionic package, the background service,
- * pairing links and model discovery.
+ * Owns the Termux side of OpenCode: optional Termux/Bionic package management,
+ * background service control, pairing links and model discovery.
  *
- * Everything the slow Termux round trips tell us is persisted (install version, service
- * URL, service password), so after an app restart the UI restores instantly from
- * SharedPreferences and the slow verification only happens on a background refresh.
- * Shell work is batched into single RUN_COMMAND scripts to minimise round trips, and
- * lightweight state ops (refresh/connection) never share a lock with heavy ops (install),
- * so installing never freezes the rest of the app.
+ * The service password is stored encrypted with Android Keystore via AiSecureStore
+ * (never in plaintext SharedPreferences). Shell commands for installing/updating the
+ * optional third-party repository are exposed for explicit user review before running.
  */
 class OpenCodeManager(private val context: Context, private val gateway: TermuxGateway) {
     companion object {
         const val TERMUX_HOME = "/data/data/com.termux/files/home"
+        const val REPO_URL = "https://bd-loser.github.io/opencode-bionic"
+        private const val SECRET_KEY_ID = "opencode_conn_pw"
         private const val OWNER = "opencode"
         private const val INSTALL_TIMEOUT = 20 * 60_000L
         private const val VERIFY_COMMAND_TIMEOUT = 60_000L
@@ -54,11 +55,9 @@ class OpenCodeManager(private val context: Context, private val gateway: TermuxG
         private const val REFRESH_CACHE_MS = 60_000L
         private const val MODELS_CACHE_MS = 10 * 60_000L
         private const val PAIR_CACHE_MS = 7L * 24 * 60 * 60 * 1000
-        private val URL_PATTERN = Regex("""https?://[^ ]+""")
         private val MODEL_PATTERN = Regex("""^[A-Za-z0-9_.@:-]+/[A-Za-z0-9_.@:#-]+$""")
         private val VERSION_PATTERN = Regex("""v?(\d+)\.""")
 
-        /** Converts the app's Termux-relative paths into absolute directories for the local API. */
         fun absoluteWorkdir(path: String): String {
             val raw = path.trim().ifBlank { "~/" }
             return when {
@@ -93,7 +92,6 @@ class OpenCodeManager(private val context: Context, private val gateway: TermuxG
     }
     private fun isArm64() = Build.SUPPORTED_ABIS.any { it.equals("arm64-v8a", ignoreCase = true) }
 
-    /** Restores the last verified install state so a restart never shows a false "not installed". */
     private fun restoreStatus(): OpenCodeStatus {
         val base = OpenCodeStatus(supported = isSupported(), supportReason = supportReason())
         if (!base.supported) return base
@@ -109,11 +107,6 @@ class OpenCodeManager(private val context: Context, private val gateway: TermuxG
         prefs.edit().putString("opencode_version", version).apply()
     }
 
-    /**
-     * One RUN_COMMAND that answers both questions at once: installed version and the
-     * service URL. The exit code is non-zero exactly when OpenCode (the binary) is missing,
-     * so a "not installed" answer is only reported after the command really executed.
-     */
     private val verifyScript = listOf(
         "V=\"\$(opencode --version 2>/dev/null | head -n1)\"",
         "U=\"\$(opencode service status 2>/dev/null | grep -oE 'https?://[^ ]+' | head -n1)\"",
@@ -121,6 +114,16 @@ class OpenCodeManager(private val context: Context, private val gateway: TermuxG
         "echo \"url=\$U\"",
         "[ -n \"\$V\" ]"
     ).joinToString("\n")
+
+    fun installCommandPreview(): String = repoSetup() + "\n" + listOf(
+        "pkg update -y",
+        "BIN=\"\$(command -v opencode || true)\"",
+        "if [ -n \"\$BIN\" ] && ! dpkg -S \"\$BIN\" >/dev/null 2>&1; then rm -f \"\$BIN\"; fi",
+        "pkg install -y opencode",
+        "opencode --version"
+    ).joinToString("\n")
+
+    fun upgradeCommandPreview(): String = repoSetup() + "\npkg update -y && pkg upgrade -y opencode"
 
     suspend fun refresh(force: Boolean = false): OpenCodeStatus {
         if (installing) return status.value
@@ -135,8 +138,6 @@ class OpenCodeManager(private val context: Context, private val gateway: TermuxG
         check(isSupported()) { supportReason() }
         val now = System.currentTimeMillis()
         connectionCache?.let { if (!force && now - connectionAt < CONNECTION_CACHE_MS) return it }
-        // Fast path: a previously stored connection (URL + password) answers with zero
-        // Termux round trips; it is verified in the background and replaced if stale.
         if (!force) storedConnection()?.let { stored ->
             connectionCache = stored
             connectionAt = now
@@ -182,9 +183,6 @@ class OpenCodeManager(private val context: Context, private val gateway: TermuxG
 
     fun storedUrl(): String = prefs.getString("opencode_url", "").orEmpty()
 
-    /** Verifies install/version (+ service URL) with one shell call. Never reports
-     *  "not installed" unless the verification command really ran and failed, and
-     *  transient Termux errors keep the last known good state. */
     private suspend fun verifyNow(): OpenCodeStatus {
         val base = OpenCodeStatus(supported = isSupported(), supportReason = supportReason())
         if (!base.supported) {
@@ -194,13 +192,11 @@ class OpenCodeManager(private val context: Context, private val gateway: TermuxG
         val previous = status.value
         val verified = try { run(verifyScript, VERIFY_COMMAND_TIMEOUT) }
         catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
-        catch (error: Exception) {
-            // Termux slow/pending/permission: keep the persisted truth, do not flip to "not installed".
+        catch (_: Exception) {
             status.value = previous.copy(checked = true)
             return status.value
         }
         if (verified.exitCode != 0) {
-            // The command executed and confirmed OpenCode is missing.
             connectionCache = null
             connectionAt = 0
             clearStoredConnection()
@@ -214,28 +210,27 @@ class OpenCodeManager(private val context: Context, private val gateway: TermuxG
         val version = stdout.lineSequence().firstOrNull { it.startsWith("ver=") }?.removePrefix("ver=")?.trim().orEmpty()
         val url = stdout.lineSequence().firstOrNull { it.startsWith("url=") }?.removePrefix("url=")?.trim().orEmpty()
         if (url.isBlank()) connectionCache = null
-        val next = base.copy(installed = true, compatible = isCompatible(version), version = version,
-            running = url.isNotBlank(), url = url, checked = true)
+        val next = base.copy(
+            installed = true, compatible = isCompatible(version), version = version,
+            running = url.isNotBlank(), url = url, checked = true
+        )
         persistVersion(version)
         lastVerifyAt = System.currentTimeMillis()
         status.value = next
         return next
     }
 
-    /**
-     * Installs the Termux/Bionic build only after an explicit installation check.
-     * The OpenCode web UI and local API are built for v2, so this refuses to touch
-     * a different package manager source and always verifies the result afterwards.
-     * Runs under its own lock, so the app stays usable during the (potentially long) install.
-     */
     suspend fun install(): OpenCodeStatus = installMutex.withLock {
         installing = true
+        BackgroundWorkCoordinator.beginTask(
+            context, "opencode-install", "opencode",
+            context.getString(R.string.opencode_install),
+            context.getString(R.string.opencode_installing)
+        )
         try {
             val base = status.value
             check(base.supported) { base.supportReason }
             val existing = if (base.checked && base.version.isNotBlank()) base else verifyNow()
-            // Only the signed Bionic package is trusted. A compatible OpenCode that is
-            // already owned by dpkg counts as complete; anything else is replaced.
             val owned = existing.installed && run(
                 "dpkg -S \"\$(command -v opencode)\" >/dev/null 2>&1 && echo yes || echo no", 30_000
             ).stdout.trim() == "yes"
@@ -243,31 +238,32 @@ class OpenCodeManager(private val context: Context, private val gateway: TermuxG
                 return@withLock existing.copy(message = "opencode_already_installed")
             }
             status.value = existing.copy(checked = true, message = "opencode_installing")
-            val command = repoSetup() + "\n" + listOf(
-                "pkg update -y",
-                "BIN=\"\$(command -v opencode || true)\"",
-                "if [ -n \"\$BIN\" ] && ! dpkg -S \"\$BIN\" >/dev/null 2>&1; then rm -f \"\$BIN\"; fi",
-                "pkg install -y opencode",
-                "opencode --version"
-            ).joinToString("\n")
-            val result = run(command, INSTALL_TIMEOUT)
+            val result = run(installCommandPreview(), INSTALL_TIMEOUT)
             check(result.exitCode == 0) { "opencode_install_failed" }
             dropConnection()
             modelsCache = emptyList()
             modelsAt = 0
-            val next = verifyNow() // also re-persists the version
+            val next = verifyNow()
             check(next.installed && next.compatible) { "opencode_install_failed" }
             next.copy(message = "opencode_installed")
-        } finally { installing = false }
+        } finally {
+            installing = false
+            BackgroundWorkCoordinator.finishTask(context, "opencode-install")
+        }
     }
 
     suspend fun upgrade(): OpenCodeStatus = installMutex.withLock {
         installing = true
+        BackgroundWorkCoordinator.beginTask(
+            context, "opencode-upgrade", "opencode",
+            context.getString(R.string.opencode_update),
+            context.getString(R.string.opencode_installing)
+        )
         try {
             val current = if (status.value.checked && status.value.version.isNotBlank()) status.value else verifyNow()
             check(current.installed) { "opencode_not_installed" }
             status.value = current.copy(message = "opencode_installing")
-            val result = run(repoSetup() + "\npkg update -y && pkg upgrade -y opencode", INSTALL_TIMEOUT)
+            val result = run(upgradeCommandPreview(), INSTALL_TIMEOUT)
             check(result.exitCode == 0) { "opencode_install_failed" }
             dropConnection()
             modelsCache = emptyList()
@@ -275,16 +271,19 @@ class OpenCodeManager(private val context: Context, private val gateway: TermuxG
             val next = verifyNow()
             check(next.installed && next.compatible) { "opencode_install_failed" }
             next.copy(message = "opencode_updated")
-        } finally { installing = false }
+        } finally {
+            installing = false
+            BackgroundWorkCoordinator.finishTask(context, "opencode-upgrade")
+        }
     }
 
     private fun repoSetup(): String = listOf(
         "set -e",
         "export DEBIAN_FRONTEND=noninteractive",
         "mkdir -p \"\$PREFIX/etc/apt/sources.list.d\" \"\$PREFIX/etc/apt/trusted.gpg.d\"",
-        "curl -fsSL https://bd-loser.github.io/opencode-bionic/opencode-bionic.gpg -o \"\$PREFIX/etc/apt/trusted.gpg.d/opencode-bionic.gpg\"",
+        "curl -fsSL $REPO_URL/opencode-bionic.gpg -o \"\$PREFIX/etc/apt/trusted.gpg.d/opencode-bionic.gpg\"",
         "chmod 644 \"\$PREFIX/etc/apt/trusted.gpg.d/opencode-bionic.gpg\"",
-        "echo 'deb [arch=aarch64] https://bd-loser.github.io/opencode-bionic stable main' > \"\$PREFIX/etc/apt/sources.list.d/opencode-bionic.list\""
+        "echo 'deb [arch=aarch64] $REPO_URL stable main' > \"\$PREFIX/etc/apt/sources.list.d/opencode-bionic.list\""
     ).joinToString("\n")
 
     suspend fun restart(): OpenCodeStatus = installMutex.withLock {
@@ -302,18 +301,10 @@ class OpenCodeManager(private val context: Context, private val gateway: TermuxG
     }
 
     fun sessionFor(key: String): String = prefs.getString(sessionPref(key), "").orEmpty()
-
-    fun saveSession(key: String, id: String) {
-        prefs.edit().putString(sessionPref(key), id).apply()
-    }
-
-    fun forgetSession(key: String) {
-        prefs.edit().remove(sessionPref(key)).apply()
-    }
-
+    fun saveSession(key: String, id: String) { prefs.edit().putString(sessionPref(key), id).apply() }
+    fun forgetSession(key: String) { prefs.edit().remove(sessionPref(key)).apply() }
     private fun sessionPref(key: String) = "opencode_session_" + key.replace(Regex("[^A-Za-z0-9_.-]"), "_")
 
-    /** Starts the service, falls back to a restart, and returns URL + password in one shell call. */
     private val serviceScript = listOf(
         "url=\"\$(opencode service status 2>/dev/null | grep -oE 'https?://[^ ]+' | head -n1)\"",
         "if [ -z \"\$url\" ]; then opencode service start >/dev/null 2>&1; sleep 2; url=\"\$(opencode service status 2>/dev/null | grep -oE 'https?://[^ ]+' | head -n1)\"; fi",
@@ -330,7 +321,7 @@ class OpenCodeManager(private val context: Context, private val gateway: TermuxG
         check(current.installed) { "opencode_not_installed" }
         val now = System.currentTimeMillis()
         connectionCache?.let { if (!force && now - connectionAt < CONNECTION_CACHE_MS) return it }
-        val result = run(serviceScript, SERVICE_COMMAND_TIMEOUT)
+        val result = run(serviceScript, SERVICE_COMMAND_TIMEOUT, secret = true)
         val url = result.stdout.lineSequence().firstOrNull { it.startsWith("url=") }?.removePrefix("url=")?.trim().orEmpty()
         val password = result.stdout.lineSequence().firstOrNull { it.startsWith("pwd=") }?.removePrefix("pwd=")?.trim().orEmpty()
         check(url.isNotBlank()) { "opencode_start_failed" }
@@ -350,7 +341,6 @@ class OpenCodeManager(private val context: Context, private val gateway: TermuxG
                 connectedStatus(connection)
             } else {
                 if (connectionCache == connection) dropConnection()
-                // Rebuild the connection through Termux so the next connection() is valid.
                 runCatching { stateMutex.withLock { connectionLocked(true) } }
             }
         }
@@ -361,23 +351,32 @@ class OpenCodeManager(private val context: Context, private val gateway: TermuxG
     }
 
     private fun OkHttpClient.isAlive(connection: OpenCodeConnection): Boolean =
-        newCall(Request.Builder().url(connection.url + "/api/model/default")
-            .header("Authorization", Credentials.basic("opencode", connection.password)).build())
-            .execute().use { it.code != 401 && it.code != 403 }
+        newCall(
+            Request.Builder().url(connection.url + "/api/model/default")
+                .header("Authorization", Credentials.basic("opencode", connection.password)).build()
+        ).execute().use { it.code != 401 && it.code != 403 }
 
     private fun storedConnection(): OpenCodeConnection? {
         val url = prefs.getString("opencode_conn_url", "").orEmpty()
-        val password = prefs.getString("opencode_conn_pw", "").orEmpty()
+        // Migrate any legacy plaintext password from v0.6.1 into Android Keystore and wipe it.
+        val legacyPlain = prefs.getString("opencode_conn_pw", "").orEmpty()
+        if (legacyPlain.isNotBlank()) {
+            runCatching { AiSecureStore.saveKey(context, SECRET_KEY_ID, legacyPlain) }
+            prefs.edit().remove("opencode_conn_pw").apply()
+        }
+        val password = runCatching { AiSecureStore.getKey(context, SECRET_KEY_ID) }.getOrDefault("")
         if (url.isBlank() || password.isBlank()) return null
         return OpenCodeConnection(url, password)
     }
 
     private fun storeConnection(connection: OpenCodeConnection) {
-        prefs.edit().putString("opencode_conn_url", connection.url).putString("opencode_conn_pw", connection.password).apply()
+        prefs.edit().putString("opencode_conn_url", connection.url).remove("opencode_conn_pw").apply()
+        runCatching { AiSecureStore.saveKey(context, SECRET_KEY_ID, connection.password) }
     }
 
     private fun clearStoredConnection() {
         prefs.edit().remove("opencode_conn_url").remove("opencode_conn_pw").apply()
+        runCatching { AiSecureStore.saveKey(context, SECRET_KEY_ID, "") }
     }
 
     private fun dropConnection() {
@@ -392,7 +391,6 @@ class OpenCodeManager(private val context: Context, private val gateway: TermuxG
                 gateway.execute(CommandSpec(command = command, workdir = "~/", label = "OpenCode", ownerId = OWNER, kind = "opencode"), timeoutMs)
             }
         } catch (timeout: kotlinx.coroutines.TimeoutCancellationException) {
-            // The command may still finish in Termux; report it instead of cancelling the UI scope.
             throw IllegalStateException("command_pending", timeout)
         }
         if (secret) runCatching { gateway.deleteCommand(result.id) }

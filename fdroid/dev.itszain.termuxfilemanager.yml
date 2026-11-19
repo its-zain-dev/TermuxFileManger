@@ -1,0 +1,29 @@
+Categories:
+  - Development
+  - System
+License: GPL-3.0-only
+AuthorName: its-zain-dev
+WebSite: https://github.com/its-zain-dev/TermuxFileManger
+SourceCode: https://github.com/its-zain-dev/TermuxFileManger
+IssueTracker: https://github.com/its-zain-dev/TermuxFileManger/issues
+Changelog: https://github.com/its-zain-dev/TermuxFileManger/blob/main/CHANGELOG.md
+
+AntiFeatures:
+  NonFreeNet:
+    en-US: The optional AI assistant can connect to commercial cloud AI APIs or ChatGPT when configured by the user. All core file, editor, terminal, and local loopback AI (Ollama/llama.cpp) features work locally without cloud accounts.
+
+RepoType: git
+Repo: https://github.com/its-zain-dev/TermuxFileManger.git
+
+Builds:
+  - versionName: 1.0.0
+    versionCode: 9
+    commit: v1.0.0
+    subdir: app
+    gradle:
+      - yes
+
+AutoUpdateMode: Version
+UpdateCheckMode: Tags
+CurrentVersion: 1.0.0
+CurrentVersionCode: 9

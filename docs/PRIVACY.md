@@ -1,32 +1,33 @@
-# Privacy information — Termux File Manager
+# Privacy Information — Termux File Manager
 
-*Applies to the open-source Android application. Last reviewed for source version 0.6.0. This document describes behavior visible in the published source; external providers set their own policies.*
+*Applies to the open-source Android application. Last reviewed for source version 1.0.0. This document describes behavior visible in the published source; external providers set their own policies.*
 
-## Information processed by the application
+## Local-first operation
 
-TFM accesses files and executes commands through Termux only after the user grants the Android Termux command permission and completes setup. File lists, edited files, console output, local chat history, workspace details and settings are stored or processed on the device or within the Termux environment as required for the features selected by the user.
+TFM accesses files and executes commands through Termux only after the user grants the Android Termux command permission and completes setup. File lists, grep searches, archive inspection/extraction, checksum calculations, disk usage reports, edited files, terminal outputs, snippets, local chat history, drafts and settings are stored and processed locally on the device or within the Termux environment.
 
 ## Network requests and optional AI services
 
-The AI assistant is optional. When a user sends a request to an AI provider, TFM sends the request content, conversation context needed for the request, and explicitly selected attachments or tool results to the configured provider's HTTPS endpoint. The provider may receive these data and apply its own privacy, retention and billing policies. Supported providers include commercial services; users should review the provider terms before use.
+All AI features are strictly optional. The file manager, code editor, archive tools, terminal workspace and local diagnostics work completely offline.
 
-If the user chooses ChatGPT sign-in, authentication uses OpenAI's browser-based authorization service, and subsequent API requests use the authorized account and endpoint. Other AI provider connections may require a user-supplied API key. Network features such as web research, skill import, model discovery and HTTPS downloads contact external services only when those features are used.
+- **Local loopback AI (Ollama / llama.cpp / OpenCode):** When configured against `127.0.0.1` or `localhost`, requests stay on the device's loopback interface. `network_security_config.xml` permits cleartext HTTP exclusively for `127.0.0.1` and `localhost`; all remote hosts require HTTPS.
+- **Optional commercial cloud AI providers:** When a user explicitly sends a prompt to a configured HTTPS provider (Gemini, Anthropic, OpenAI, OpenRouter, Groq, Mistral, Cohere, DeepSeek, xAI, Together, or ChatGPT OAuth), TFM transmits the prompt, necessary conversation history, and explicitly attached images or tool results to that endpoint.
+- **Optional web search, skill imports, and OpenCode apt setup:** These contact external HTTPS services only when explicitly initiated and reviewed by the user.
 
-When the optional local OpenCode integration is enabled, the app and the OpenCode agent communicate only through the device's local loopback interface; the manifest permits cleartext traffic exclusively for `127.0.0.1` and `localhost`. OpenCode remains a user-controlled local service that keeps its sessions, tools and model configuration in Termux, and its own outbound calls to its configured model endpoints follow OpenCode's settings and policies. Its prompts stay on the device unless used to reach those model endpoints.
+## Credentials, encryption and execution safety
 
-## Credentials, media and execution
+- Provider API keys, ChatGPT OAuth tokens, and local OpenCode service passwords are encrypted at rest using a non-exportable Android Keystore AES-GCM key (`AiSecureStore`).
+- Internal shell commands that retrieve pairing tokens or service passwords are immediately purged from the local command history database.
+- Screen capture uses explicit Android `MediaProjection` consent and only attaches images when the user explicitly selects them.
+- Archive extraction strictly validates member paths to block path traversal (Zip Slip) and malicious symlink entries.
 
-The project uses Android Keystore-backed storage for AI credentials and account tokens, according to the source. A screen capture requires Android's screen capture authorization, and screenshots/images are only sent to an AI endpoint when deliberately attached or included in a user-approved request. Shell commands run with the permissions of the connected Termux app, and may read or modify files; dangerous operations should be reviewed before approval.
+## Zero analytics, tracking, or proprietary SDKs
 
-## Analytics, advertising and third parties
-
-The reviewed Gradle dependencies do not include Google Play Services, Firebase or an advertising/analytics SDK. This is not a claim about data collection performed by independently operated AI services or other external endpoints. The application is not itself an AI cloud host.
+TFM contains zero Google Play Services, Firebase, Crashlytics, advertising, telemetry, or third-party analytics SDKs. The Gradle release build disables Google's `DependencyInfoBlock` and Git `vcsInfo` metadata for full auditability and F-Droid reproducible builds.
 
 ## Control and contact
 
-Users can avoid external AI requests by not configuring or using the assistant. They can remove configured API keys, disconnect accounts using app settings, and uninstall the app to remove application-private data, subject to Android and Termux storage behavior. Termux user files may remain separately.
+Users can clear chat history, clear terminal history, remove saved API keys, sign out of ChatGPT accounts, disable background task notifications, or uninstall the app to wipe all app-private data.
 
-Issues and privacy questions: https://github.com/its-zain-dev/TermuxFileManger/issues
-
-The maintained source code and release history are published at:
-https://github.com/its-zain-dev/TermuxFileManger
+- Source code: https://github.com/its-zain-dev/TermuxFileManger
+- Issues & privacy questions: https://github.com/its-zain-dev/TermuxFileManger/issues

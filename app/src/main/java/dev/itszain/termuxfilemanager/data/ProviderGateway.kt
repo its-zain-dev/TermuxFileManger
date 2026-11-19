@@ -20,36 +20,51 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 class ApiFailure(val status: Int, val detail: String, val retryAfter: String = "") : IOException(detail)
-class ProviderGateway(private val context: Context, private val client: OkHttpClient = OkHttpClient.Builder()
-    .connectTimeout(18, TimeUnit.SECONDS).readTimeout(90, TimeUnit.SECONDS)
-    .followRedirects(false).followSslRedirects(false).build(),
+
+class ProviderGateway(
+    private val context: Context,
+    private val client: OkHttpClient = OkHttpClient.Builder()
+        .connectTimeout(18, TimeUnit.SECONDS).readTimeout(90, TimeUnit.SECONDS)
+        .followRedirects(false).followSslRedirects(false).build(),
     private val keyFor: (String) -> String = { AiSecureStore.getKey(context, it) },
     private val allowRequest: (String) -> Boolean = { AiSecureStore.allowRequest(context, it) },
     private val planToken: suspend () -> String = { context.graph().chatGpt.accessToken() },
-    private val openCode: OpenCodeGateway? = null) : AiGateway {
+    private val openCode: OpenCodeGateway? = null
+) : AiGateway {
     val modelNames = java.util.concurrent.ConcurrentHashMap<String, String>()
+
     override fun stream(request: AiRequest): Flow<AiEvent> {
         if (request.provider == "opencode") return requireNotNull(openCode) { "opencode_unavailable" }.stream(request)
         return remoteStream(request)
     }
+
     private fun remoteStream(request: AiRequest): Flow<AiEvent> = callbackFlow {
         val provider = AiProvider.byId(request.provider)
-        val key = if(provider.id == "chatgpt") planToken() else keyFor(provider.id)
-        require(key.isNotBlank()) { "missing_key" }
+        var address = if (provider.id == "chatgpt") "https://api.openai.com/v1/responses" else AiSecureStore.getEndpoint(context, provider.id)
+        val loopback = AiProvider.isLoopbackEndpoint(address)
+        val key = if (provider.id == "chatgpt") planToken() else keyFor(provider.id)
+        require(key.isNotBlank() || loopback) { "missing_key" }
         val model = request.model.ifBlank { AiSecureStore.getModel(context, provider.id) }
         require(model.isNotBlank()) { "missing_model" }
-        check(allowRequest(provider.id)) { "rate_limit" }
+        check(loopback || allowRequest(provider.id)) { "rate_limit" }
         val history = JSONArray().apply { request.history.forEach { (role, text) -> put(JSONObject().put("role", role).put("text", text)) } }
-        val body = if(provider.id == "chatgpt") ResponsesCodec.payload(model, request, AiApiClient.systemPrompt(context, request.nativeTools.isNotEmpty())) else AiApiClient.payload(context, provider, model, history, request.imagePath,
-            AiSecureStore.settings(context).getInt("output_budget_tokens", 2048))
-        var address = if(provider.id == "chatgpt") "https://api.openai.com/v1/responses" else AiSecureStore.getEndpoint(context, provider.id)
+        val body = if (provider.id == "chatgpt") {
+            ResponsesCodec.payload(model, request, AiApiClient.systemPrompt(context, request.nativeTools.isNotEmpty()))
+        } else {
+            AiApiClient.payload(
+                context, provider, model, history, request.imagePath,
+                AiSecureStore.settings(context).getInt("output_budget_tokens", 2048)
+            )
+        }
         if (provider.type == "gemini") {
             address = address.replace("{model}", URLEncoder.encode(model, "UTF-8")).replace(":generateContent", ":streamGenerateContent")
             address += (if ('?' in address) "&" else "?") + "alt=sse"
         }
-        val call = client.newCall(requestBuilder(provider, address, key)
-            .header("Accept", "text/event-stream, application/json")
-            .post(body.toString().toRequestBody("application/json; charset=utf-8".toMediaType())).build())
+        val call = client.newCall(
+            requestBuilder(provider, address, key)
+                .header("Accept", "text/event-stream, application/json")
+                .post(body.toString().toRequestBody("application/json; charset=utf-8".toMediaType())).build()
+        )
         call.enqueue(object : Callback {
             override fun onFailure(call: Call, error: IOException) { close(error) }
             override fun onResponse(call: Call, response: Response) {
@@ -62,36 +77,43 @@ class ProviderGateway(private val context: Context, private val client: OkHttpCl
                         var hasThinking = false
                         val onCall: (AiEvent.ToolCall) -> Unit = { hasToolCalls = true; trySendBlocking(it) }
                         val onOutput: (List<String>) -> Unit = { items ->
-                            if(items.any { runCatching { JSONObject(it).optString("type") == "reasoning" }.getOrDefault(false) }) hasThinking = true
+                            if (items.any { runCatching { JSONObject(it).optString("type") == "reasoning" }.getOrDefault(false) }) hasThinking = true
                             trySendBlocking(AiEvent.ResponseOutput(items))
                         }
                         var eventName = ""
                         val listener = object : AiApiClient.StreamListener {
                             override fun onText(fragment: String) { trySendBlocking(AiEvent.Text(fragment)) }
                             override fun onThinking(fragment: String) {
-                                if(fragment.isNotBlank()) hasThinking = true
+                                if (fragment.isNotBlank()) hasThinking = true
                                 trySendBlocking(AiEvent.Thinking(fragment))
                             }
                         }
                         val source = requireNotNull(reply.body).source()
-                        if (reply.header("Content-Type", "").orEmpty().contains("text/event-stream", ignoreCase = true) || source.peek().readUtf8Line()?.let { it.startsWith("data:") || it.startsWith("event:") || it.startsWith(":") } == true) {
+                        if (reply.header("Content-Type", "").orEmpty().contains("text/event-stream", ignoreCase = true) ||
+                            source.peek().readUtf8Line()?.let { it.startsWith("data:") || it.startsWith("event:") || it.startsWith(":") } == true
+                        ) {
                             val event = StringBuilder()
                             fun flush() {
-                                val data = event.toString().trim(); event.setLength(0)
+                                val data = event.toString().trim()
+                                event.setLength(0)
                                 if (data.isBlank() || data == "[DONE]") return
-                                if(provider.id == "chatgpt") completed = ResponsesCodec.decode(data, listener, output, eventName, onCall, onOutput) || completed else decode(provider.type, data, listener, output)
+                                if (provider.id == "chatgpt") completed = ResponsesCodec.decode(data, listener, output, eventName, onCall, onOutput) || completed
+                                else decode(provider.type, data, listener, output)
                             }
                             while (!completed && !source.exhausted() && !call.isCanceled()) {
                                 val line = source.readUtf8Line() ?: break
                                 if (line.isEmpty()) { flush(); eventName = "" }
                                 else if (line.startsWith("event:")) eventName = line.substring(6).trim()
-                                else if (line.startsWith("data:")) { if (event.isNotEmpty()) event.append('\n'); event.append(line.substring(5).trimStart()) }
+                                else if (line.startsWith("data:")) {
+                                    if (event.isNotEmpty()) event.append('\n')
+                                    event.append(line.substring(5).trimStart())
+                                }
                                 check(event.length <= 2_000_000 && output.length <= 2_000_000) { "response_too_large" }
                             }
                             flush()
                         } else {
                             val raw = source.readUtf8()
-                            if(provider.id == "chatgpt") completed = ResponsesCodec.decode(raw, listener, output, onCall = onCall, onOutput = onOutput)
+                            if (provider.id == "chatgpt") completed = ResponsesCodec.decode(raw, listener, output, onCall = onCall, onOutput = onOutput)
                             else decode(provider.type, raw, listener, output)
                         }
                         if (!call.isCanceled()) {
@@ -101,23 +123,29 @@ class ProviderGateway(private val context: Context, private val client: OkHttpCl
                             close()
                         }
                     }
-                } catch (error: Exception) { close(error) }
+                } catch (error: Exception) {
+                    close(error)
+                }
             }
         })
         awaitClose { call.cancel() }
     }
+
     private fun decode(type: String, data: String, listener: AiApiClient.StreamListener, output: StringBuilder) {
         val root = JSONObject(data)
         if (root.has("error")) throw ApiFailure(200, root.optJSONObject("error")?.optString("message") ?: "provider_error")
         AiApiClient.decode(type, root, listener, output)
     }
+
     private fun requestBuilder(provider: AiProvider, address: String, key: String): Request.Builder {
-        require(address.startsWith("https://")) { "https_required" }
+        require(AiProvider.isAllowedEndpoint(address)) { "https_required" }
         return Request.Builder().url(address).apply {
-            when (provider.type) {
-                "gemini" -> header("x-goog-api-key", key)
-                "anthropic" -> { header("x-api-key", key); header("anthropic-version", "2023-06-01") }
-                else -> header("Authorization", "Bearer $key")
+            if (key.isNotBlank()) {
+                when (provider.type) {
+                    "gemini" -> header("x-goog-api-key", key)
+                    "anthropic" -> { header("x-api-key", key); header("anthropic-version", "2023-06-01") }
+                    else -> header("Authorization", "Bearer $key")
+                }
             }
             if (provider.id == "openrouter") {
                 header("HTTP-Referer", "https://github.com/its-zain-dev/TermuxFileManger")
@@ -125,12 +153,14 @@ class ProviderGateway(private val context: Context, private val client: OkHttpCl
             }
         }
     }
+
     private fun checkReply(response: Response) {
         if (response.isSuccessful) return
         val raw = response.body?.string().orEmpty()
         val detail = runCatching { JSONObject(raw).optJSONObject("error")?.optString("message") }.getOrNull()
         throw ApiFailure(response.code, detail?.take(1000) ?: "HTTP ${response.code}", response.header("Retry-After").orEmpty())
     }
+
     suspend fun models(providerId: String): List<String> {
         if (providerId == "opencode") return requireNotNull(openCode) { "opencode_unavailable" }.models()
         val provider = AiProvider.byId(providerId)
@@ -142,14 +172,22 @@ class ProviderGateway(private val context: Context, private val client: OkHttpCl
             "cohere" -> endpoint.substringBefore("/v2/") + "/v1/models?endpoint=chat"
             else -> endpoint.replace("/chat/completions", "/models")
         }
-        val call = client.newCall(requestBuilder(provider, address, (if(providerId == "chatgpt") planToken() else keyFor(providerId))).get().build())
+        val key = if (providerId == "chatgpt") planToken() else keyFor(providerId)
+        val call = client.newCall(requestBuilder(provider, address, key).get().build())
         val raw = suspendCancellableCoroutine<String> { continuation ->
             continuation.invokeOnCancellation { call.cancel() }
             call.enqueue(object : Callback {
                 override fun onFailure(call: Call, error: IOException) { if (continuation.isActive) continuation.resumeWithException(error) }
                 override fun onResponse(call: Call, response: Response) {
-                    try { response.use { checkReply(it); val data = it.body?.string().orEmpty(); if (continuation.isActive) continuation.resume(data) } }
-                    catch (error: Exception) { if (continuation.isActive) continuation.resumeWithException(error) }
+                    try {
+                        response.use {
+                            checkReply(it)
+                            val data = it.body?.string().orEmpty()
+                            if (continuation.isActive) continuation.resume(data)
+                        }
+                    } catch (error: Exception) {
+                        if (continuation.isActive) continuation.resumeWithException(error)
+                    }
                 }
             })
         }
@@ -157,13 +195,15 @@ class ProviderGateway(private val context: Context, private val client: OkHttpCl
         val array = root.optJSONArray("data") ?: root.optJSONArray("models") ?: root.optJSONObject("data")?.optJSONArray("models") ?: JSONArray()
         val models = (0 until array.length()).mapNotNull {
             val item = array.optJSONObject(it) ?: return@mapNotNull null
-            if(providerId == "chatgpt") {
-                if(item.optString("visibility") != "list") return@mapNotNull null
-                val slug = item.getString("slug"); modelNames[slug] = item.optString("display_name", slug); return@mapNotNull slug
+            if (providerId == "chatgpt") {
+                if (item.optString("visibility") != "list") return@mapNotNull null
+                val slug = item.getString("slug")
+                modelNames[slug] = item.optString("display_name", slug)
+                return@mapNotNull slug
             }
             if (provider.type == "gemini" && item.has("supportedGenerationMethods") && !item.getJSONArray("supportedGenerationMethods").toString().contains("generateContent")) return@mapNotNull null
             item.optString("id", item.optString("name", item.optString("model"))).removePrefix("models/").takeIf(String::isNotBlank)
         }.distinct()
-        return if(providerId == "chatgpt") models else models.sorted()
+        return if (providerId == "chatgpt") models else models.sorted()
     }
 }

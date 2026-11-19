@@ -1,25 +1,22 @@
-<b>Termux File Manager (TFM)</b> is an open-source Android workspace for the Termux terminal environment. Browse files, edit code, run reviewed commands and manage developer tools from a native interface.
+<b>Termux File Manager (TFM)</b> is a free, open-source Android developer workspace for Termux. Browse files across tabs, edit syntax-highlighted code, run ANSI-colored commands, inspect archives and collaborate with local or cloud AI assistants — all without root.
 
-<b>File management</b>
-• Browse Termux directories and shared storage (when configured).
-• Search files, sort, switch between list and grid views, mark favorites and see recent folders.
-• Copy, move and delete multiple items with conflict handling and operation history.
+<b>File manager</b>
+• Multi-tab folder browsing for Termux home, $PREFIX and shared storage.
+• Filename search and full-text content search (grep) with regex and jump-to-line.
+• Category filters, extension sorting, Git branch indicator and live storage meter.
+• Persistent Copy/Cut/Paste clipboard, multi-select batch operations and conflict resolution.
+• Built-in image previewer, archive inspector/creator/extractor (ZIP & tar.gz with Zip-Slip protection), MD5/SHA-1/SHA-256 checksums, directory disk-usage analyzer, symlinks and visual rwx permission matrix.
 
-<b>Code editor and terminal</b>
-• Edit UTF-8 text files with line numbers, search, undo/redo and local drafts (up to 256 KiB).
-• Use named working directories, run commands and view command output and exit status.
-• Launch interactive terminal programs inside Termux.
-• Access developer package managers, diagnostics and archive utilities.
+<b>Code editor &amp; terminal</b>
+• Syntax-highlighted UTF-8 code editor with smart undo/redo, find &amp; replace, coding symbol bar, auto-indent, go-to-line, JSON formatter, Markdown preview, unsaved diff viewer and paginated read-only viewer for large files.
+• Multi-session terminal with ANSI color rendering, custom command snippets, searchable command history, interactive Termux launch and one-tap AI debugging.
+• Searchable Tools Hub covering Termux packages, Git toolkit, language package managers, local HTTP server, network diagnostics and HTTPS downloads with SHA-256 verification.
 
-<b>Optional AI assistant</b>
-• Use chats linked to Termux sessions and review shell/file actions before execution by default.
-• Configure supported AI provider endpoints with your own API keys, or use supported ChatGPT account sign-in.
-• Enable web research and import agent skills when you choose.
-• Some AI providers are proprietary network services and may require accounts, payment or other conditions. AI is optional; file and command features work without an AI account.
+<b>Optional AI assistant &amp; local agents</b>
+• Works 100% locally offline for files, editor and terminal; AI is strictly optional.
+• Supports local self-hosted servers (Ollama / llama.cpp on 127.0.0.1) and optional Termux OpenCode integration, as well as user-configured cloud API providers and ChatGPT sign-in.
+• Sixteen guarded assistant tools (including grep_files, surgical edit_file diffs and git_log) with review-before-run approval by default.
+• API keys and local service passwords are encrypted using Android Keystore AES-GCM.
 
-<b>Setup</b>
-Install and open Termux separately, then use "Connect to Termux" in TFM and follow the permission/setup steps. TFM itself supports Android 6+, but current supported Termux releases require Android 7+ for the backend. No root is required.
-
-The app supports English and Arabic, phone and tablet layouts, and light, dark and AMOLED themes. It does not bundle the Termux environment or bypass Android permissions.
-
-<b>Privacy:</b> File operations and history are local; when you deliberately use an AI provider, data in the request and explicitly attached content are sent to that configured network service. See the project's privacy document for details.
+<b>Setup &amp; Privacy</b>
+Install Termux separately (available on F-Droid or termux.dev), open it once, then follow "Connect to Termux" in TFM. Supports English and Arabic (RTL), five themes plus Material You dynamic colors, and phone/tablet layouts. Contains zero ads, trackers or proprietary SDKs.

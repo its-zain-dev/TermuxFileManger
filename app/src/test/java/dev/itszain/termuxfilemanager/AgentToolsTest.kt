@@ -29,12 +29,15 @@ class AgentToolsTest {
         val schemas = AgentTools.schemas(AgentTools.all.map { it.name }.toSet())
         assertEquals("namespace", schemas.getJSONObject(0).getString("type"))
         val functions = schemas.getJSONObject(0).getJSONArray("tools")
-        assertEquals(13, functions.length())
+        assertEquals(16, functions.length())
         for(i in 0 until functions.length()) {
             val f = functions.getJSONObject(i);val p = f.getJSONObject("parameters")
             assertFalse(p.getBoolean("additionalProperties"));assertEquals(p.getJSONObject("properties").length(),p.getJSONArray("required").length())
         }
         assertFalse(AgentTools.needsReview(AgentAction("app_info","{}"),false))
+        assertFalse(AgentTools.needsReview(AgentAction("grep_files","{\"path\":\"~/\",\"query\":\"todo\"}"),false))
+        assertFalse(AgentTools.needsReview(AgentAction("git_log","{\"path\":\"~/\"}"),false))
+        assertTrue(AgentTools.needsReview(AgentAction("edit_file","{}"),false))
         assertTrue(AgentTools.needsReview(AgentAction("write_file","{}"),false))
         assertTrue(AgentTools.needsReview(AgentAction("run_shell","{\"command\":\"rm -rf ~/x\"}"),true))
         assertTrue(AgentTools.isGreeting("مرحبا!"));assertFalse(AgentTools.isGreeting("مرحبا افحص المشروع"))

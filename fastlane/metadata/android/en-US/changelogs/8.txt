@@ -1,0 +1,1 @@
+Version 0.6.1: Persisted OpenCode installation state across restarts, eliminated first-paint lag with cached loopback connections and loading overlays, batched shell round trips, and made the OpenCode tab fullscreen.

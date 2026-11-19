@@ -16,9 +16,15 @@ android {
         applicationId 'dev.itszain.termuxfilemanager'
         minSdk 23
         targetSdk 32
-        versionCode 8
-        versionName '0.6.1'
+        versionCode 9
+        versionName '1.0.0'
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
+    }
+
+    // F-Droid compliance & reproducible builds: strip Google's encrypted DependencyInfoBlock.
+    dependenciesInfo {
+        includeInApk = false
+        includeInBundle = false
     }
 
     if (tfmReleaseSigningEnabled) {
@@ -37,6 +43,10 @@ android {
             minifyEnabled true
             shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            // Omit local Git commit metadata so F-Droid and independent builders produce identical APKs.
+            vcsInfo {
+                include = false
+            }
             if (tfmReleaseSigningEnabled) {
                 signingConfig signingConfigs.release
             }
@@ -55,7 +65,12 @@ android {
     kotlinOptions { jvmTarget = '17' }
     buildFeatures { compose true; buildConfig true }
     testOptions { unitTests.includeAndroidResources = true }
-    packaging { resources.excludes += ['/META-INF/{AL2.0,LGPL2.1}'] }
+    packaging {
+        resources.excludes += [
+            '/META-INF/{AL2.0,LGPL2.1}',
+            '/META-INF/version-control-info.textproto'
+        ]
+    }
 }
 
 ksp { arg('room.schemaLocation', "$projectDir/schemas") }

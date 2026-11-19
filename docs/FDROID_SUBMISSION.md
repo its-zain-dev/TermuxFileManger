@@ -1,54 +1,46 @@
-# F-Droid submission preparation — Termux File Manager
+# F-Droid Submission & Patch Compliance Guide — Termux File Manager
 
-## Verified source facts (checked 2026-10-30)
+## Verified Source & Build Compliance (v1.0.0 / versionCode 9)
 
-- Source repository: https://github.com/its-zain-dev/TermuxFileManger
-- Android application ID: `dev.itszain.termuxfilemanager`
-- Source version at inspection: `versionName '0.5.0'`, `versionCode 6`
-- Android build: single Gradle `app` module; AGP 8.7.3, Gradle 8.9, JDK 17, compileSdk 35, minSdk 23, targetSdk 32.
-- Main branch GitHub release v0.5.0-build.24 predates addition of GPL-3.0 licensing files and upstream store metadata.
-- Licensing choice from the project owner: **GPL-3.0-only**. Review contributor and asset rights before publishing.
-- Direct Gradle deps appear to be AndroidX/Jetpack Compose, OkHttp, Kotlin coroutines, Room, JUnit and Robolectric; no Firebase, Play Services or obvious proprietary SDK in direct dependencies.
-- Optional user-configured commercial AI services (ChatGPT, Gemini, Anthropic, etc.) warrant transparent disclosure; F-Droid maintainers may apply `NonFreeNet` anti-feature. The core file tools do not require an AI account.
-- Release-key / signing secrets are NOT to be committed to the source, supplied to F-Droid, or included in metadata.
+- **Source Repository:** https://github.com/its-zain-dev/TermuxFileManger
+- **Application ID:** `dev.itszain.termuxfilemanager`
+- **License:** `GPL-3.0-only` (`LICENSE` + `COPYRIGHT`)
+- **Toolchain:** Single `:app` Gradle module, AGP `8.7.3`, Gradle `8.9` (`distributionSha256Sum` pinned), JDK 17, `compileSdk 35`, `minSdk 23`, `targetSdk 32` (intentionally kept for Termux `RUN_COMMAND` compatibility).
+- **Reproducible & Scanner-Clean Gradle Build:**
+  - `dependenciesInfo { includeInApk = false; includeInBundle = false }` strips Google's encrypted `DependencyInfoBlock` (`0x504b4453`).
+  - `buildTypes.release.vcsInfo { include = false }` omits `META-INF/version-control-info.textproto`.
+  - Release signing is disabled when `TFM_RELEASE_KEYSTORE_PATH` is unset, so F-Droid produces an unsigned Release APK to sign with its own infrastructure key.
+  - Zero proprietary SDKs, Google Play Services, Firebase, Crashlytics, or analytics libraries in Gradle dependencies.
+  - Zero committed APKs, native `.so` blobs, keystores, or unauthorized JARs.
+- **Security & Network Transparency:**
+  - `android:usesCleartextTraffic="false"` and `android:allowBackup="false"`.
+  - `network_security_config.xml` permits cleartext HTTP **only** for `127.0.0.1` and `localhost` (used by optional local Ollama / llama.cpp and local OpenCode services). All remote endpoints strictly enforce HTTPS.
+  - All API keys, OAuth tokens, and local OpenCode service passwords are encrypted using Android Keystore AES-GCM (`AiSecureStore`).
+  - Optional third-party OpenCode Termux repository setup (`bd-loser/opencode-bionic`) is never executed silently — users must review the exact shell command and repository URL first, and can copy/run it manually or skip it entirely.
+- **AntiFeatures Disclosure:**
+  - `NonFreeNet`: Optional cloud AI providers (Gemini, Claude, OpenAI, ChatGPT OAuth, etc.). Core file manager, editor, terminal, tools, and local loopback Ollama/llama.cpp work 100% locally.
 
-## Package contents
+## Repository Files for F-Droid
 
-- `LICENSE` — verbatim GNU General Public License version 3 text.
-- `COPYRIGHT` — notice of licensing scope and third-party code.
-- `fastlane/metadata/android/en-US` and `ar` — storefront titles, descriptions, release notes for **versionCode 6**, and original graphic based on app launcher icon.
-- `docs/PRIVACY.md` — reviewable description of local and optional remote processing.
-- `fdroiddata-draft/dev.itszain.termuxfilemanager.yml` — build-metadata TEMPLATE, **not ready for direct submission** until a newer tagged source release exists.
-- `RFP-DRAFT.md` — request-for-packaging text to paste into GitLab if preferred to a direct fdroiddata merge request.
+- `LICENSE` — Verbatim GNU GPL v3 (`GPL-3.0-only`).
+- `COPYRIGHT` — Scope and third-party notices.
+- `fdroid/dev.itszain.termuxfilemanager.yml` — Ready-to-submit `fdroiddata` recipe.
+- `docs/FDROID_RFP.md` — Ready-to-file GitLab RFP template.
+- `docs/PRIVACY.md` — Privacy and network behavior documentation.
+- `fastlane/metadata/android/en-US/` and `ar/` — Titles, short/full descriptions, icons (`512×512`), feature graphics (`1024×500`), and changelogs for versionCodes `6`, `7`, `8`, and `9`.
+- `scripts/check_fdroid.py` — Automated compliance verifier executed in GitHub Actions CI (pre-build source checks + post-build Release APK binary inspection).
 
-## Before submitting an official F-Droid request
+## Automated Verification Commands
 
-1. Merge this source change, inspect `LICENSE`, review copyrights of contributors and any copied assets.
-2. Build and test the app from the published tree, including offline/without AI account. Confirm no proprietary binary dependencies appear in the transitive dependency graph and no downloaded executables bypass user consent.
-3. **Create a new version and tagged commit AFTER these new metadata/license files are merged**, e.g. update the project to `versionName '0.6.0'`, `versionCode 7`, and tag that source commit `v0.6.0`. F-Droid builds a tag/commit, not an APK from GitHub Releases. The release workflow publishes main-branch tags of the form `v0.6.0-build.<number>`; do not reuse the existing `v0.5.0-build.24` tag because it points at earlier sources without this license.
-4. Update the `fdroiddata-draft` template to match the actual newly tagged `versionName`, `versionCode` and commit/tag. Do not copy placeholder versions into fdroiddata.
-5. Capture **real current-version screenshots** from the actual app (phone and optional tablet). Add them as PNG/JPEG at `fastlane/metadata/android/en-US/images/phoneScreenshots/1.png` etc. Old screenshots from different versions were deliberately excluded.
-6. Confirm the `NonFreeNet` disclosure with maintainers. Note that cloud AI is optional and the file/terminal features are local.
-7. Prefer a merge request to `https://gitlab.com/fdroid/fdroiddata` with the final metadata YAML or open a request at `https://gitlab.com/fdroid/rfp/-/issues/new` using `RFP-DRAFT.md`.
-8. In the application description, link to `docs/PRIVACY.md` if helpful; avoid implying GitHub-signed APKs can update F-Droid-signed APKs. They cannot unless both share the same signing key.
-9. When approved, F-Droid's build infrastructure compiles from source and signs its own APK. Expect review and possible changes requested by maintainers.
-
-## Testing (developer machine / GitHub Actions, not required on Termux)
-
-```
+```bash
 python3 -m unittest discover -s tests -v
+python3 scripts/check_fdroid.py
 ./gradlew --no-daemon testReleaseUnitTest lintRelease assembleRelease
+python3 scripts/check_fdroid.py --apk app/build/outputs/apk/release/app-release-unsigned.apk
 ```
 
-Do not publish release APKs signed with the permanent GitHub key inside the source tree. For the F-Droid official build, leave `TFM_RELEASE_KEYSTORE_PATH` unset so Gradle creates an unsigned Release APK for F-Droid to sign. The GitHub Actions workflow can continue using its private signing secrets independently.
+## Remaining Manual Step Before Opening the `fdroiddata` MR
 
-## Why the draft is not already an accepted F-Droid release
-
-- F-Droid official inclusion requires build verification and human review.
-- Current tagged source does not yet contain these files. A new tag is essential.
-- Confirm optional cloud functionality, licenses of any imported code, transitive dependency licenses and Android/Termux permission behavior.
-
-Official guides:
-- https://f-droid.org/docs/Submitting_to_F-Droid_Quick_Start_Guide/
-- https://f-droid.org/docs/Inclusion_Policy/
-- https://f-droid.org/docs/All_About_Descriptions_Graphics_and_Screenshots/
+1. Merge the `v1.0.0` release commit to `main` and create an annotated Git tag `v1.0.0` pointing at that commit.
+2. Optionally capture fresh phone screenshots (`fastlane/metadata/android/en-US/images/phoneScreenshots/1.png`, etc.) on a clean workspace with no private paths or keys.
+3. Submit `fdroid/dev.itszain.termuxfilemanager.yml` as a merge request to `https://gitlab.com/fdroid/fdroiddata` (or file an RFP at `https://gitlab.com/fdroid/rfp/-/issues/new` using `docs/FDROID_RFP.md`).

@@ -37,6 +37,7 @@ interface AppDao {
     @Query("SELECT * FROM messages WHERE chatId=:id ORDER BY time, rowid") fun messages(id: String): Flow<List<MessageRecord>>
     @Query("SELECT * FROM messages WHERE chatId=:id ORDER BY time, rowid") suspend fun history(id: String): List<MessageRecord>
     @Upsert suspend fun saveMessage(message: MessageRecord)
+    @Query("DELETE FROM messages WHERE chatId=:id") suspend fun deleteMessages(id: String)
     @Query("UPDATE messages SET status='interrupted' WHERE status IN ('streaming','running','awaiting_approval')") suspend fun interruptStreams()
     @Query("SELECT * FROM sessions ORDER BY rowid") fun sessions(): Flow<List<SessionRecord>>
     @Query("SELECT * FROM sessions ORDER BY rowid") suspend fun allSessions(): List<SessionRecord>

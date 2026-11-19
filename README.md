@@ -31,7 +31,7 @@
 
 </div>
 
-> **Termux File Manager (TFM)** is a native, open-source Android file manager built for people who work in Termux. Browse and edit files, run shell commands, manage programming tools and collaborate with an AI coding assistant, all from one app. No root required. **Version 0.6.0** adds a local **OpenCode** integration — the OpenCode agent as an AI provider and the official OpenCode web UI in a dedicated tab. Version 0.5.0 introduced native ChatGPT tool calling and a searchable tools hub.
+> **Termux File Manager (TFM)** is a native, open-source Android file manager and developer workspace built for Termux. Browse files across tabs, edit syntax-highlighted code, run ANSI-colored shell commands, inspect archives, manage developer tools, and collaborate with local or cloud AI coding assistants — all without root. **Version 1.0.0** delivers a complete UI and feature overhaul: multi-tab browsing, full-text `grep` content search, image viewer, archive inspector/creator/extractor (Zip-Slip protected), checksums, disk usage analyzer, visual `chmod` matrix, syntax-highlighted code editor with find & replace + symbol bar + Markdown preview + large-file viewer, ANSI terminal with snippets & history, local **Ollama / llama.cpp** support, encrypted OpenCode integration, and F-Droid reproducible build compliance.
 
 ---
 
@@ -46,36 +46,36 @@
     <td width="50%" valign="top">
       <img src="docs/assets/icon-folder.svg" alt="Files" width="30" />
       <h3>Files and folders</h3>
-      Browse in list or grid view, follow breadcrumbs, search recursively, show hidden files, sort, pin favorites and revisit recent folders. Perform multi-select copy, move and delete operations with conflict handling and persistent history.
+      Multi-tab list or grid browsing, breadcrumbs, Git branch detection, live storage meter, filename search and full-text content search (<code>grep</code>) with regex and jump-to-line. Includes category filters, extension sorting, persistent copy/cut/paste clipboard, image viewer, archive inspector/creator/extractor, MD5/SHA-1/SHA-256 checksums, disk-usage analyzer, symlinks and visual <code>rwx</code> permission matrix.
     </td>
     <td width="50%" valign="top">
       <img src="docs/assets/icon-code.svg" alt="Editor" width="30" />
       <h3>Code editor</h3>
-      Edit UTF-8 text files up to 256 KiB with line numbers, search, undo/redo and saved drafts. Atomic writes preserve line endings and permissions; an external modification check prevents accidental overwrites.
+      Syntax-highlighted UTF-8 editor for Kotlin, Java, Python, JS/TS, JSON, XML/HTML, Bash, C/C++/Rust/Go, YAML, CSS, SQL and Markdown. Features smart undo/redo, find &amp; replace, coding symbol accessory bar, auto-indent, go-to-line, JSON formatter, live Markdown preview, diff viewer, atomic fingerprint-guarded saves and paginated read-only viewing for large files.
     </td>
   </tr>
   <tr>
     <td valign="top">
       <img src="docs/assets/icon-terminal.svg" alt="Terminal" width="30" />
       <h3>Termux terminal integration</h3>
-      Choose working directories and named sessions, review commands before running, and inspect stdout, stderr and exit codes. Interactive terminal applications open in Termux instead of a simulated in-app PTY.
+      Named sessions, ANSI color rendering, customizable command snippets, searchable command history, review-before-run safety, interactive Termux shell launch, session log export and one-tap "Ask AI" debugging for failing commands.
     </td>
     <td valign="top">
       <img src="docs/assets/icon-spark.svg" alt="AI agent" width="30" />
-      <h3>AI coding agent</h3>
-      Multi-conversation assistant with streamed responses, attached images, project context, web research, skill files and reviewed tool calls. Connect ChatGPT or your configured API provider; write operations require approval by default.
+      <h3>AI coding agent &amp; local LLMs</h3>
+      Multi-conversation assistant with full Markdown rendering (tables, lists, syntax-highlighted code), 16 guarded tools (including <code>grep_files</code>, surgical <code>edit_file</code> diffs and <code>git_log</code>), slash-skill autocomplete, foreground approval notifications, local loopback <strong>Ollama / llama.cpp</strong> support, ChatGPT OAuth and configurable HTTPS providers.
     </td>
   </tr>
   <tr>
     <td valign="top">
       <img src="docs/assets/icon-tools.svg" alt="Developer tools" width="30" />
       <h3>Developer tools hub</h3>
-      Search tools and manage Termux packages, Python/pip, npm, Cargo, Go, RubyGems, Composer and LuaRocks workflows. Run diagnostics, download files over HTTPS and work with archives.
+      Searchable toolkit for Termux packages, Git workflows, Python/pip, npm, Cargo, Go, RubyGems, Composer, LuaRocks, local HTTP preview server, network diagnostics, SHA-256 verified HTTPS downloads, archives and live per-tool assistant toggles.
     </td>
     <td valign="top">
       <img src="docs/assets/icon-globe.svg" alt="Localization" width="30" />
-      <h3>Designed for Android</h3>
-      Kotlin, Jetpack Compose and Material 3 with responsive phone/tablet navigation, English/Arabic UI and light, dark and AMOLED themes. RTL layout preserves readable left-to-right paths and code.
+      <h3>Designed for Android &amp; F-Droid</h3>
+      Kotlin, Jetpack Compose and Material 3 with responsive phone/tablet layouts, English/Arabic RTL, 5 curated themes plus Android 12+ Material You dynamic colors, adaptive monochrome icon, zero trackers and F-Droid reproducible builds (<code>DependencyInfoBlock</code> &amp; <code>vcsInfo</code> disabled).
     </td>
   </tr>
   <tr>
